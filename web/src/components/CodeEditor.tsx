@@ -9,6 +9,7 @@ import { css } from '@codemirror/lang-css';
 import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { useTheme } from '../lib/theme';
 
 const langOf = (lang: string): Extension => {
   switch (lang) {
@@ -28,6 +29,7 @@ export default function CodeEditor({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
+  const { resolved } = useTheme();
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -47,15 +49,19 @@ export default function CodeEditor({
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       langOf(language),
-      oneDark,
+      // Dark surface gets the one-dark palette; the light theme leans on
+      // CodeMirror's default (light) highlight style.
+      ...(resolved === 'dark' ? [oneDark] : []),
       EditorView.updateListener.of((u) => {
         if (u.docChanged && onChangeRef.current) onChangeRef.current(u.state.doc.toString());
       }),
       EditorView.theme({
         '&': { height: typeof height === 'number' ? `${height}px` : height, backgroundColor: 'transparent' },
         '.cm-scroller': { overflow: 'auto' },
-        '.cm-gutters': { backgroundColor: 'transparent', borderRight: '1px solid rgba(255,255,255,0.06)' },
-        '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.035)' },
+        '.cm-gutters': { backgroundColor: 'transparent', borderRight: '1px solid var(--line)', color: 'var(--dim)' },
+        '.cm-activeLine': { backgroundColor: 'var(--w2)' },
+        '.cm-content': { caretColor: 'var(--pink)' },
+        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--pink-soft)' },
         '.cm-activeLineGutter': { backgroundColor: 'transparent' },
         '&.cm-focused': { outline: 'none' },
       }),
@@ -66,7 +72,7 @@ export default function CodeEditor({
     view.current = v;
     return () => { v.destroy(); view.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language, readOnly, typeof height === 'number' ? height : height]);
+  }, [language, readOnly, typeof height === 'number' ? height : height, resolved]);
 
   // sync external value (e.g. switching files)
   useEffect(() => {

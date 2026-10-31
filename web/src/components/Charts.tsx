@@ -36,21 +36,21 @@ export function AreaChart({ data, height = 240 }: { data: { date: string; reques
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
       <defs>
         <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#fd366e" stopOpacity="0.34" />
-          <stop offset="60%" stopColor="#8b5cf6" stopOpacity="0.1" />
-          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--pink)" stopOpacity="0.30" />
+          <stop offset="60%" stopColor="var(--violet)" stopOpacity="0.10" />
+          <stop offset="100%" stopColor="var(--violet)" stopOpacity="0" />
         </linearGradient>
         <linearGradient id="lineStroke" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#8b5cf6" />
-          <stop offset="100%" stopColor="#fd366e" />
+          <stop offset="0%" stopColor="var(--violet)" />
+          <stop offset="100%" stopColor="var(--pink)" />
         </linearGradient>
       </defs>
       {ticks.map((t) => {
         const yy = padT + innerH * t;
         return (
           <g key={t}>
-            <line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 5" />
-            <text x={padL - 9} y={yy + 3.5} textAnchor="end" fontSize="9.5" fill="#5c5c6a">
+            <line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke="var(--line)" strokeDasharray="3 5" />
+            <text x={padL - 9} y={yy + 3.5} textAnchor="end" fontSize="9.5" fill="var(--dim)">
               {Math.round(max * (1 - t))}
             </text>
           </g>
@@ -58,13 +58,13 @@ export function AreaChart({ data, height = 240 }: { data: { date: string; reques
       })}
       <path d={area} fill="url(#areaFill)" />
       <path d={line} fill="none" stroke="url(#lineStroke)" strokeWidth="2.1" strokeLinecap="round" />
-      <path d={smooth(ePts)} fill="none" stroke="#fd366e" strokeOpacity="0.5" strokeWidth="1.3" strokeDasharray="4 4" />
+      <path d={smooth(ePts)} fill="none" stroke="var(--pink)" strokeOpacity="0.5" strokeWidth="1.3" strokeDasharray="4 4" />
       {pts.map((p, i) => (
-        <circle key={i} cx={p[0]} cy={p[1]} r="1.9" fill="#0b0b0f" stroke="#fd366e" strokeWidth="1.3" opacity={i === pts.length - 1 ? 1 : 0} />
+        <circle key={i} cx={p[0]} cy={p[1]} r="1.9" fill="var(--bg)" stroke="var(--pink)" strokeWidth="1.3" opacity={i === pts.length - 1 ? 1 : 0} />
       ))}
       {data.map((d, i) =>
         i % Math.ceil(data.length / 7) === 0 || i === data.length - 1 ? (
-          <text key={d.date} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="#5c5c6a">
+          <text key={d.date} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="var(--dim)">
             {d.date.slice(5).replace('-', '/')}
           </text>
         ) : null,
@@ -73,7 +73,7 @@ export function AreaChart({ data, height = 240 }: { data: { date: string; reques
   );
 }
 
-export function Sparkline({ data, color = '#fd366e', width = 96, height = 34 }: { data: number[]; color?: string; width?: number; height?: number }) {
+export function Sparkline({ data, color = 'var(--pink)', width = 96, height = 34 }: { data: number[]; color?: string; width?: number; height?: number }) {
   if (!data.length) return null;
   const max = Math.max(...data, 1);
   const min = Math.min(...data);
@@ -98,18 +98,18 @@ export function Sparkline({ data, color = '#fd366e', width = 96, height = 34 }: 
   );
 }
 
-export function Ring({ value, size = 54, color = '#fd366e', label }: { value: number; size?: number; color?: string; label?: string }) {
+export function Ring({ value, size = 54, color = 'var(--pink)', label }: { value: number; size?: number; color?: string; label?: string }) {
   const r = (size - 8) / 2;
   const c = 2 * Math.PI * r;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--w4)" strokeWidth="4" />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="4"
         strokeDasharray={`${c * Math.min(value, 1)} ${c}`} strokeLinecap="round"
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
       />
-      <text x="50%" y="52%" textAnchor="middle" dominantBaseline="middle" fontSize="10" fill="#d8d8e2" fontWeight="600">
+      <text x="50%" y="52%" textAnchor="middle" dominantBaseline="middle" fontSize="10" fill="var(--text-soft)" fontWeight="600">
         {label ?? `${Math.round(value * 100)}%`}
       </text>
     </svg>
