@@ -27,6 +27,10 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
+      # 英文原文即 key：任何 t('…') 缺少中文词条、或占位符对不上都会在这里失败。
+      - name: i18n coverage
+        run: pnpm i18n:check
+
       - name: Build
         run: pnpm build
 

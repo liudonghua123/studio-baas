@@ -8,6 +8,7 @@
     "build": "pnpm --filter web build && pnpm --filter server build",
     "start": "node server/dist/index.js",
     "typecheck": "pnpm -r typecheck",
+    "i18n:check": "pnpm --filter @studio-baas/server exec tsx ../scripts/i18n-check.ts",
     "tunnel": "bash scripts/tunnel.sh",
     "tunnel:prod": "bash scripts/tunnel.sh --prod"
   },
