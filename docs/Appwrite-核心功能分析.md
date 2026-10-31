@@ -346,7 +346,7 @@ Agent 使用这些工具时的三个工程要求：
 | 编辑器 | CodeMirror 6 | 云函数 / 站点文件的在线编辑与语法高亮 |
 | 后端 | Node.js 22 + Express + TypeScript | 单进程 API 网关，SSE 实时事件 |
 | 存储 | SQLite（better-sqlite3） | 元数据 + 文档 JSON；文件落本地磁盘 |
-| 沙箱 | Node `vm` + 模块白名单 + 超时 | 云函数执行，注入平台 SDK 能力 |
+| 沙箱 | `worker_threads` + Node `vm` + 模块白名单 + 超时 terminate | 云函数执行，注入平台 SDK 能力 |
 | AI | DeepSeek Chat Completions + Tool Calling | 26 个工具覆盖全部服务；无 Key 时降级为本地规则引擎 |
 
 ### 8.2 功能映射表

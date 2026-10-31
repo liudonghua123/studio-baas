@@ -14,7 +14,7 @@
 
 ## 这是什么
 
-把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在 Node `vm` 沙箱里，站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 31 个工具**真实调用**平台 API 而不是只聊天。
+把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 31 个工具**真实调用**平台 API 而不是只聊天。
 
 资源都是**项目级**的：集合、存储桶、函数、站点、消息、API Key、日志、定时任务、域名、仓库绑定全部挂在 project 下，切换项目就切换整个上下文；每个项目再叠一层 RBAC（owner / admin / developer / viewer × 22 个权限点），人和 API Key 走同一套权限矩阵。
 
@@ -102,9 +102,9 @@ export default async ({ req, res, log, databases, env }) => {
 | 模块 | 能力 |
 |---|---|
 | **Dashboard** | 文档/文件/函数/用户指标、14 天流量趋势、服务健康、最近执行、集合分布 |
-| **Databases** | 集合与 9 种类型化属性、文档 CRUD、Appwrite 风格 `queries[]` 过滤、表单与 JSON 双模式编辑 |
+| **Databases** | 集合与 9 种类型化属性、文档 CRUD、Appwrite 风格 `queries[]` 过滤、**文档级权限**（`read("user:…")` / `team:…/role`）、表单与 JSON 双模式编辑 |
 | **Storage** | 多桶、扩展名白名单、体积限制、拖拽上传、图片预览、直链分享 |
-| **Functions** | 在线编辑（CodeMirror 6）、保存版本、自定义 payload 执行、日志/响应/错误、环境变量、执行历史 |
+| **Functions** | 在线编辑（CodeMirror 6）、保存版本、自定义 payload 执行、**worker 线程隔离执行**、日志/响应/错误、环境变量、执行历史 |
 | **Domains** | 自定义域名、TXT 校验、证书签发状态、Host 头路由、`DOMAIN_VERIFY_MODE` 真实校验 |
 | **Schedules** | cron 解析与时区、未来三次执行预览、暂停/恢复、立即执行、执行状态回写 |
 | **GitHub** | 仓库/分支/入口文件绑定、Pull/Push、webhook 验签与分支过滤、部署历史、最近提交 |
@@ -115,7 +115,7 @@ export default async ({ req, res, log, databases, env }) => {
 | **Messaging** | Email / SMS / Push 统一发送与投递日志 |
 | **Logs** | 请求日志 SSE 实时 tail、按服务与状态码过滤 |
 | **AI Assistant** | DeepSeek 工具调用（31 个工具）、轨迹可视化、Demo 模式降级 |
-| **Settings** | API Key 作用域管理、DeepSeek 配置、重置演示数据 |
+| **Settings** | API Key 作用域管理（明文只返回一次，库里存 SHA-256）、DeepSeek 配置、重置演示数据 |
 
 ## 快速开始
 
@@ -181,7 +181,7 @@ export DEEPSEEK_MODEL=deepseek-chat    # 可选
 
 - **前端**：React 18、Vite 6、TypeScript、CodeMirror 6、lucide-react、自研设计系统（无 UI 框架）
 - **后端**：Node.js 22、Express 4、TypeScript、better-sqlite3（WAL）、multer
-- **运行时**：Node `vm` 沙箱 + 模块白名单 + 超时控制，ESM 转译
+- **运行时**：`worker_threads` 独立线程 + Node `vm` 沙箱 + 模块白名单 + 超时终止，ESM 转译
 - **实时**：SSE 事件总线（集合、文档、文件、函数、站点变更）
 - **AI**：DeepSeek Chat Completions（OpenAI 兼容）+ Tool Calling，最多 6 轮规划
 
@@ -244,10 +244,12 @@ studio-baas/
 这是**本地演示实现**，不是生产级多租户平台 —— 但权限与项目隔离是真实生效的：
 
 - 每个 `/v1` 请求都会解析出 `projectId` + `principal`，store 层查询按项目过滤，路由层用 `guard(permission)` 拦截，越权返回 403；
-- 未提供任何凭据时按「演示 owner」放行，方便本地体验；接入真实登录后同一套守卫无需改动；
-- 云函数使用 Node `vm` 沙箱，不构成强隔离边界，勿执行不可信代码；
-- 文件存于本地 `server/data/uploads`，桶加密标记仅为元数据；
-- API Key 明文展示，生产应哈希存储；GitHub token 只存服务端、不回传前端；
+- 未提供任何凭据时按「演示 owner」放行，方便本地体验；携带了失效的会话 / Key 则返回 401，不会回退成 owner；
+- 开启集合的 **document security** 后，`read("any" | "users" | "user:<id>" | "team:<id>/<role>")` 会在列表、单条读取、更新、删除四处生效；无 read 权限时单条返回 404，不泄漏存在性；
+- 云函数跑在独立的 `worker_threads` 线程里，超时直接 `terminate()`，死循环不会再拖垮 API（仍是共享内核，不是容器级隔离）；
+- API Key 只存 SHA-256 摘要，明文仅在创建响应里出现一次，列表只显示预览；
+- 文件存于本地 `server/data/uploads`，桶加密标记仅为元数据；GitHub token 只存服务端、不回传前端；
+- `x-studio-act-as`（View as role）是**演示后门**，任何调用方都能声称自己是 owner；公网部署前请移除或加环境开关；
 - 公网隧道是公开可访问的，演示完请关闭，且不要在公网实例里填真实 Key。
 
 ## License
