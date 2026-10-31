@@ -10,9 +10,10 @@ import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
 import { chat, getAiConfig, tools } from './ai.js';
-import { runWithContext, currentProjectId, DEFAULT_PROJECT_ID } from './context.js';
+import { runWithContext, withProject, currentProjectId, DEFAULT_PROJECT_ID } from './context.js';
 import { resolveAuth, guard, me } from './auth.js';
 import * as members from './members.js';
+import * as domains from './domains.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,26 @@ app.use((req, res, next) => {
   next();
 });
 const mapService = (s: string) => (s === 'databases' ? 'databases' : s);
+
+/* ------------------------------------------------------- custom domains */
+// 自定义域名走 Host 路由：命中已激活的域名时，把请求直接交给对应函数处理
+app.use(async (req, res, next) => {
+  const host = (req.headers.host || '').split(':')[0].toLowerCase();
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host.endsWith('.trycloudflare.com')) return next();
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return next();
+  const dom = domains.activeDomainByHost(host);
+  if (!dom) return next();
+  try {
+    const r = await withProject(dom.projectId, () => store.executeFunction(dom.functionId, {
+      method: req.method, path: req.path, query: req.query, headers: req.headers, body: req.body,
+    }, 'http'));
+    res.status(r.statusCode || 200);
+    Object.entries(r.headers || {}).forEach(([k, v]) => res.setHeader(k, String(v)));
+    res.send(typeof r.response === 'string' ? r.response : JSON.stringify(r.response));
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'Function error' });
+  }
+});
 
 /* ---------------------------------------------------------------- core */
 app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.6.0-studio', uptime: process.uptime() }));
@@ -260,6 +281,24 @@ app.get('/v1/functions/:id/executions', guard('functions.read'), wrap((req, res)
 }));
 
 app.get('/v1/executions', guard('functions.read'), (_req, res) => res.json({ executions: store.listExecutions(undefined, 30) }));
+
+/* ------------------------------------------------------- function domains */
+app.get('/v1/functions/:id/domains', guard('functions.read'), wrap((req, res) => {
+  res.json({ domains: domains.listDomains(req.params.id) });
+}));
+
+app.post('/v1/functions/:id/domains', guard('functions.write'), wrap((req, res) => {
+  if (!store.getFunction(req.params.id)) return fail(res, new Error('Function not found'), 404);
+  res.status(201).json(domains.addDomain(req.params.id, req.body?.hostname));
+}));
+
+app.post('/v1/functions/:id/domains/:domainId/verify', guard('functions.write'), wrap(async (req, res) => {
+  res.json(await domains.verifyDomain(req.params.domainId));
+}));
+
+app.delete('/v1/functions/:id/domains/:domainId', guard('functions.write'), wrap((req, res) => {
+  res.json({ ok: domains.removeDomain(req.params.domainId) });
+}));
 
 /* ---------------------------------------------------------------- sites */
 app.get('/v1/sites', guard('sites.read'), (_req, res) => res.json({ total: store.listSites().length, sites: store.listSites() }));

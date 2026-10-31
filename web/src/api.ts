@@ -1,6 +1,6 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, LogEntry, Me, Member, Message, Metrics, Project, Site, User,
+  FileItem, FunctionDef, FunctionDomain, LogEntry, Me, Member, Message, Metrics, Project, Site, User,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -87,6 +87,10 @@ export const api = {
   execute: (id: string, payload: any) => post<Execution>(`/v1/functions/${id}/executions`, payload),
   executions: (id: string) => get<{ executions: Execution[] }>(`/v1/functions/${id}/executions`),
   allExecutions: () => get<{ executions: Execution[] }>('/v1/executions'),
+  domains: (id: string) => get<{ domains: FunctionDomain[] }>(`/v1/functions/${id}/domains`),
+  addDomain: (id: string, hostname: string) => post<FunctionDomain>(`/v1/functions/${id}/domains`, { hostname }),
+  verifyDomain: (id: string, domainId: string) => post<FunctionDomain>(`/v1/functions/${id}/domains/${domainId}/verify`),
+  deleteDomain: (id: string, domainId: string) => del(`/v1/functions/${id}/domains/${domainId}`),
 
   sites: () => get<{ sites: Site[] }>('/v1/sites'),
   site: (id: string) => get<Site>(`/v1/sites/${id}`),

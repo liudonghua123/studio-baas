@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Play, Save, Trash2, Clock, Terminal, Settings2, Plus, X,
   ChevronRight, CheckCircle2, AlertCircle, Loader2, Boxes, KeyRound,
+  Code2, Globe2, CalendarClock, GitBranch,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Execution, FunctionDef } from '../types';
@@ -10,6 +11,7 @@ import CodeEditor from '../components/CodeEditor';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDuration, statusTone, timeAgo, fmtDateTime } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import DomainsTab from '../components/DomainsTab';
 
 export default function FunctionDetail() {
   const { id } = useParams();
@@ -30,6 +32,7 @@ export default function FunctionDetail() {
   const [envOpen, setEnvOpen] = useState(false);
   const [envRows, setEnvRows] = useState<{ k: string; v: string }[]>([]);
   const [meta, setMeta] = useState({ name: '', timeout: 15, schedule: '' });
+  const [view, setView] = useState<'code' | 'domains'>('code');
 
   const load = async () => {
     try {
@@ -129,7 +132,16 @@ export default function FunctionDetail() {
         </div>
       </div>
 
-      <div className="fn-grid">
+      <div className="fn-tabs">
+        <button className={`tab ${view === 'code' ? 'active' : ''}`} onClick={() => setView('code')}>
+          <Code2 size={13} /> Code
+        </button>
+        <button className={`tab ${view === 'domains' ? 'active' : ''}`} onClick={() => setView('domains')}>
+          <Globe2 size={13} /> Domains
+        </button>
+      </div>
+
+      {view === 'code' ? (<div className="fn-grid">
         <div className="stack">
           <div className="card">
             <div className="editor-head">
@@ -250,7 +262,9 @@ export default function FunctionDetail() {
             </div>
           </div>
         </div>
-      </div>
+      </div>) : (
+        <DomainsTab functionId={fn.id} functionName={fn.name} />
+      )}
 
       <Modal open={payloadOpen} onClose={() => setPayloadOpen(false)} title="Execute function"
         subtitle="Payload is passed to the function as req.body."

@@ -33,6 +33,13 @@ export interface FunctionDef {
   executions?: number; lastExecution?: { createdAt: string; status: string } | null;
   description?: string;
 }
+export interface FunctionDomain {
+  id: string; projectId: string; functionId: string; hostname: string;
+  status: 'pending' | 'verifying' | 'active' | 'failed';
+  verificationToken: string; dnsRecord: string;
+  sslStatus: 'pending' | 'issued' | 'failed';
+  createdAt: string; verifiedAt: string | null; lastCheckAt: string | null; note?: string;
+}
 export interface Execution {
   id: string; functionId: string; functionName: string; status: string; triggerType: string;
   duration: number; logs: string[]; response: any; errors: string[]; createdAt: string;
