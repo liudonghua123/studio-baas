@@ -90,7 +90,20 @@ export async function executeFunctionCode(code: string, ctx: ExecContext, timeou
     timer = setTimeout(() => reject(new Error(`Execution timed out after ${timeoutSec}s`)), timeoutSec * 1000);
   });
   try {
-    return await Promise.race([fn(ctx), timeout]);
+    // 关键：`while (true) {}` 这类同步死循环不会让出事件循环，Promise.race 根本
+    // 没机会执行，整个 Node 进程（含所有 HTTP 请求）会被一起冻住。
+    // 因此把「调用函数」这一步也放进 vm 并带上 timeout，由 V8 强制中断。
+    sandbox.__call = () => fn(ctx);
+    const invoke = new vm.Script('__result = __call()', { filename: 'invoke.js' });
+    try {
+      invoke.runInContext(context, { timeout: timeoutSec * 1000 });
+    } catch (e: any) {
+      if (e?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
+        throw new Error(`Execution timed out after ${timeoutSec}s (blocking loop terminated)`);
+      }
+      throw e;
+    }
+    return await Promise.race([sandbox.__result, timeout]);
   } finally {
     clearTimeout(timer!);
   }
