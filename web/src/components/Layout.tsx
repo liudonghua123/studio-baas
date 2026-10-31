@@ -3,9 +3,11 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Database, FolderOpen, Boxes, Globe2, Users, Send, Sparkles,
   ScrollText, Settings2, BookOpen, Search, Bell, ChevronDown, HelpCircle, Activity,
-  Layers, Check, Plus,
+  Layers, Check, Plus, ShieldCheck, UserRound,
 } from 'lucide-react';
 import { api, currentProjectId, setProject } from '../api';
+import { useAuth } from '../lib/auth';
+import { ROLE_META, roleColor, roleLabel } from '../lib/roles';
 import type { Project } from '../types';
 
 const nav = [
@@ -46,7 +48,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [menu, setMenu] = useState(false);
   const [aiMode, setAiMode] = useState<'demo' | 'deepseek'>('demo');
+  const [acct, setAcct] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const acctRef = useRef<HTMLDivElement>(null);
+  const { me, role, actAs, setActAs } = useAuth();
+  const initials = (me?.principal?.name || 'Studio BaaS')
+    .split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
   useEffect(() => {
     api.projects().then((r) => {
@@ -62,6 +69,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(false);
+      if (acctRef.current && !acctRef.current.contains(e.target as Node)) setAcct(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
@@ -143,6 +151,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <NavLink to="/projects" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Layers /><span>Projects</span>
           </NavLink>
+          <NavLink to="/members" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <ShieldCheck /><span>Members</span>
+          </NavLink>
           <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Settings2 /><span>Settings</span>
           </NavLink>
@@ -185,10 +196,56 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <NavLink to="/logs" className="icon-btn" title="Activity"><Activity size={14} /></NavLink>
             <button className="icon-btn" title="Notifications"><Bell size={14} /></button>
             <button className="icon-btn" title="Help"><HelpCircle size={14} /></button>
-            <div className="avatar">AF</div>
+            <div className="acct-wrap" ref={acctRef}>
+              <button className="acct-btn" onClick={() => setAcct((v) => !v)} title="Switch identity / role">
+                <span className="avatar">{initials}</span>
+                <span className="acct-meta">
+                  <b>{me?.principal?.name || 'Demo Owner'}</b>
+                  <small><i className="role-dot" style={{ background: roleColor(role) }} />{roleLabel(role)}</small>
+                </span>
+                <ChevronDown size={12} />
+              </button>
+              {acct && (
+                <div className="proj-menu acct-menu">
+                  <div className="acct-head">
+                    <div className="acct-avatar" style={{ background: roleColor(role) }}>{initials}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <b>{me?.principal?.name}</b>
+                      <small>{me?.principal?.type === 'key' ? 'API key' : 'Console session'} · {roleLabel(role)}</small>
+                    </div>
+                  </div>
+                  <div className="proj-menu-label">View as role</div>
+                  {ROLE_META.map((r) => (
+                    <button key={r.id} className="proj-item" onClick={() => { setAcct(false); setActAs(r.id); }}>
+                      <span className="proj-dot" style={{ background: r.color }} />
+                      <span className="proj-item-text">
+                        <b>{r.label}</b>
+                        <small>{r.description}</small>
+                      </span>
+                      {actAs === r.id && <Check size={13} color="#fd366e" />}
+                    </button>
+                  ))}
+                  <div className="proj-menu-sep" />
+                  <button className="proj-item" onClick={() => { setAcct(false); nav2('/members'); }}>
+                    <UserRound size={13} />
+                    <span className="proj-item-text"><b>Manage members</b><small>Invite people and change roles</small></span>
+                  </button>
+                  <div className="acct-note">Local demo: switching role only changes the console's own requests.</div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
-        <div className="page-scroll">{children}</div>
+        <div className="page-scroll">
+          {actAs !== 'owner' && (
+            <div className="act-as-banner">
+              <ShieldCheck size={13} />
+              <span>Viewing as <b>{roleLabel(actAs)}</b> — write actions are blocked by RBAC. Switch back in the account menu.</span>
+              <button onClick={() => setActAs('owner')}>Reset to owner</button>
+            </div>
+          )}
+          {children}
+        </div>
       </div>
     </div>
   );

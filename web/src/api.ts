@@ -1,6 +1,6 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, LogEntry, Message, Metrics, Project, Site, User,
+  FileItem, FunctionDef, LogEntry, Me, Member, Message, Metrics, Project, Site, User,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -42,6 +42,12 @@ const del = <T>(p: string) => request<T>(p, { method: 'DELETE' });
 export const api = {
   metrics: () => get<Metrics>('/v1/metrics'),
   projects: () => get<{ projects: Project[]; currentProjectId: string }>('/v1/projects'),
+  me: () => get<Me>('/v1/auth/me'),
+  permissions: () => get<{ roles: any[]; permissions: any[]; matrix: Record<string, string[]> }>('/v1/permissions'),
+  members: () => get<{ members: Member[]; me: Me }>('/v1/members'),
+  addMember: (body: any) => post<Member>('/v1/members', body),
+  updateMember: (id: string, role: string) => patch<Member>(`/v1/members/${id}`, { role }),
+  removeMember: (id: string) => del(`/v1/members/${id}`),
   createProject: (body: any) => post<Project>('/v1/projects', body),
   updateProject: (id: string, body: any) => patch<Project>(`/v1/projects/${id}`, body),
   deleteProject: (id: string) => del(`/v1/projects/${id}`),
@@ -119,4 +125,5 @@ export const previewUrl = (siteId: string) => `/v1/sites/${siteId}/preview/${'in
 export function setProject(id: string) {
   if (id) localStorage.setItem(PROJECT_KEY, id);
   else localStorage.removeItem(PROJECT_KEY);
+  window.dispatchEvent(new Event('studio:project-changed'));
 }

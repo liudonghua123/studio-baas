@@ -654,3 +654,39 @@ th,td{border-bottom:1px solid #1e1e2a;padding:8px 10px;text-align:left}th{color:
 
   return true;
 }
+
+/* ------------------------------------------------------------ 团队成员 */
+
+/** 幂等地补齐演示用的项目成员与角色（owner / admin / developer / viewer） */
+export function seedMembers() {
+  const hash = (pw: string) => crypto.scryptSync(pw, 'studio-salt', 32).toString('hex');
+  const ensureUser = (name: string, email: string) => {
+    const existing = db.prepare('SELECT id FROM users WHERE email=?').get(email) as any;
+    if (existing) return existing.id as string;
+    const id = uid('usr_');
+    db.prepare(`INSERT INTO users (id,name,email,passwordHash,status,emailVerified,labels,prefs,createdAt,lastLoginAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      id, name, email, hash('aurora-demo'), 'active', 1, '["team"]', '{"theme":"dark"}', now(), now(),
+    );
+    return id;
+  };
+
+  const rows: [string, string, string, string][] = [
+    ['studio', 'Alex Fisher', 'alex@aurora.io', 'owner'],
+    ['studio', 'Mia Fischer', 'mia@northwind.io', 'admin'],
+    ['studio', 'Lukas Brandt', 'lukas@fieldkit.co', 'developer'],
+    ['studio', 'Ava Laurent', 'ava@studioform.fr', 'viewer'],
+    ['prj_nebula', 'Noah Weber', 'noah@weber.dev', 'owner'],
+    ['prj_nebula', 'Sofia Rossi', 'sofia@atelier.it', 'developer'],
+    ['prj_nebula', 'Alex Fisher', 'alex@aurora.io', 'viewer'],
+  ];
+  for (const [projectId, name, email, role] of rows) {
+    if (!db.prepare('SELECT 1 FROM projects WHERE id=?').get(projectId)) continue;
+    const userId = ensureUser(name, email);
+    if (db.prepare('SELECT 1 FROM members WHERE projectId=? AND userId=?').get(projectId, userId)) continue;
+    db.prepare('INSERT INTO members (id,projectId,userId,role,createdAt) VALUES (?,?,?,?,?)').run(
+      uid('mem_'), projectId, userId, role, now(),
+    );
+  }
+  return true;
+}

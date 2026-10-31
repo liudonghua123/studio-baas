@@ -4,6 +4,7 @@ import { api } from '../api';
 import type { Message } from '../types';
 import { Badge, Empty, Loading, useToast } from '../components/ui';
 import { fmtDateTime, statusTone, timeAgo } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 const channels = [
   { id: 'email', label: 'Email', icon: Mail, hint: 'SMTP / Sendgrid / Resend provider' },
@@ -13,6 +14,7 @@ const channels = [
 
 export default function Messaging() {
   const toast = useToast();
+  const { can } = useAuth();
   const [channel, setChannel] = useState('email');
   const [recipient, setRecipient] = useState('mia@northwind.io');
   const [subject, setSubject] = useState('Your order is on the way');
@@ -78,7 +80,7 @@ export default function Messaging() {
               <textarea className="textarea" style={{ minHeight: 140 }} value={body} onChange={(e) => setBody(e.target.value)} />
             </div>
             <div className="flex">
-              <button className="btn primary" onClick={send} disabled={busy || !recipient || !body}>
+              <button className="btn primary" onClick={send} disabled={busy || !recipient || !body || !can('messaging.write')}>
                 <Send size={14} /> {busy ? 'Sending…' : 'Send message'}
               </button>
               <span className="tiny dim" style={{ marginLeft: 'auto' }}>delivered via {channel} provider</span>

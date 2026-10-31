@@ -9,6 +9,7 @@ import type { Site, SiteFile } from '../types';
 import CodeEditor from '../components/CodeEditor';
 import { Badge, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 const langOf = (p: string) => (p.endsWith('.html') ? 'html' : p.endsWith('.css') ? 'css' : p.endsWith('.json') ? 'json' : 'javascript');
 
@@ -16,6 +17,7 @@ export default function SiteDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const { can } = useAuth();
   const [site, setSite] = useState<Site | null>(null);
   const [files, setFiles] = useState<SiteFile[]>([]);
   const [current, setCurrent] = useState('index.html');
@@ -130,10 +132,10 @@ export default function SiteDetail() {
             <button className="mini-btn" style={{ background: device === 'tablet' ? 'rgba(255,255,255,.07)' : undefined }} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={13} /></button>
             <button className="mini-btn" style={{ background: device === 'mobile' ? 'rgba(255,255,255,.07)' : undefined }} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={13} /></button>
           </div>
-          <button className="btn ghost" onClick={saveNow} disabled={saving}>
+          <button className="btn ghost" onClick={saveNow} disabled={saving || !can('sites.write')}>
             {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {saving ? 'Saving' : 'Save'}
           </button>
-          <button className="btn primary" onClick={deploy}><Rocket size={14} /> Deploy</button>
+          <button className="btn primary" disabled={!can('sites.deploy')} onClick={deploy}><Rocket size={14} /> Deploy</button>
         </div>
       </div>
 

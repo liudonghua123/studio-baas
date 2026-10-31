@@ -88,9 +88,11 @@ export function Drawer({
 
 /* ------------------------------------------------------------------- badge */
 
-export function Badge({ children, tone = '', dot = false }: { children: React.ReactNode; tone?: string; dot?: boolean }) {
+export function Badge({ children, tone = '', dot = false, style }: {
+  children: React.ReactNode; tone?: string; dot?: boolean; style?: React.CSSProperties;
+}) {
   return (
-    <span className={`badge ${tone}`}>
+    <span className={`badge ${tone}`} style={style}>
       {dot && <i className="dot" />}
       {children}
     </span>

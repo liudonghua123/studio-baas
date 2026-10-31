@@ -5,12 +5,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate, db, now } from './db.js';
-import { seed, seedDemoProject } from './seed.js';
+import { seed, seedDemoProject, seedMembers } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
 import { chat, getAiConfig, tools } from './ai.js';
 import { runWithContext, currentProjectId, DEFAULT_PROJECT_ID } from './context.js';
+import { resolveAuth, guard, me } from './auth.js';
+import * as members from './members.js';
+import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
@@ -20,6 +23,7 @@ const DOCS_DIR = path.join(ROOT, 'docs');
 migrate();
 const seeded = seed();
 seedDemoProject();
+seedMembers();
 
 const app = express();
 app.use(cors());
@@ -33,7 +37,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 
 app.use((req, _res, next) => {
   const requested = String(req.header('x-project-id') || req.query.projectId || '');
   const project = requested ? projects.getProject(requested) : projects.defaultProject();
-  runWithContext({ projectId: project?.id || DEFAULT_PROJECT_ID, principal: null }, () => next());
+  const fallback = project?.id || DEFAULT_PROJECT_ID;
+  const auth = resolveAuth(req, fallback);
+  // API Key 自带项目归属，优先于请求头，避免跨项目读取
+  runWithContext({ projectId: auth.projectId || fallback, principal: auth.principal }, () => next());
 });
 
 const wrap = (fn: (req: express.Request, res: express.Response) => Promise<any> | any) =>
@@ -68,73 +75,102 @@ const mapService = (s: string) => (s === 'databases' ? 'databases' : s);
 /* ---------------------------------------------------------------- core */
 app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.6.0-studio', uptime: process.uptime() }));
 
-app.get('/v1/project', (_req, res) => {
+app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
   res.json({ ...p, seeded, services: store.getMetrics().services });
 });
 
+/* ------------------------------------------------------------- identity */
+app.get('/v1/auth/me', (_req, res) => res.json(me(currentProjectId())));
+
+app.get('/v1/permissions', (_req, res) => res.json({
+  roles: ROLES,
+  permissions: PERMISSIONS,
+  matrix: Object.fromEntries(ROLES.map((r) => [r.id, permissionsForRole(r.id)])),
+}));
+
+/* -------------------------------------------------------------- members */
+app.get('/v1/members', guard('members.read'), (_req, res) => {
+  const list = members.listMembers(currentProjectId());
+  res.json({ total: list.length, members: list, me: me(currentProjectId()) });
+});
+
+app.post('/v1/members', guard('members.write'), wrap((req, res) => {
+  res.status(201).json(members.addMember(currentProjectId(), req.body || {}));
+}));
+
+app.patch('/v1/members/:id', guard('members.write'), wrap((req, res) => {
+  const m = members.updateMemberRole(currentProjectId(), req.params.id, req.body?.role);
+  if (!m) return fail(res, new Error('Member not found'), 404);
+  res.json(m);
+}));
+
+app.delete('/v1/members/:id', guard('members.write'), wrap((req, res) => {
+  res.json({ ok: members.removeMember(currentProjectId(), req.params.id) });
+}));
+
 /* --------------------------------------------------------------- projects */
-app.get('/v1/projects', (_req, res) => {
+app.get('/v1/projects', guard('project.read'), (_req, res) => {
   const list = projects.listProjects();
   res.json({ total: list.length, projects: list, currentProjectId: currentProjectId() });
 });
 
-app.post('/v1/projects', wrap((req, res) => res.status(201).json(projects.createProject(req.body || {}))));
+app.post('/v1/projects', guard('project.write'), wrap((req, res) => res.status(201).json(projects.createProject(req.body || {}))));
 
-app.get('/v1/projects/:id', wrap((req, res) => {
+app.get('/v1/projects/:id', guard('project.read'), wrap((req, res) => {
   const p = projects.getProject(req.params.id);
   if (!p) return fail(res, new Error('Project not found'), 404);
   res.json(p);
 }));
 
-app.patch('/v1/projects/:id', wrap((req, res) => {
+app.patch('/v1/projects/:id', guard('project.write'), wrap((req, res) => {
   const p = projects.updateProject(req.params.id, req.body || {});
   if (!p) return fail(res, new Error('Project not found'), 404);
   res.json(p);
 }));
 
-app.delete('/v1/projects/:id', wrap((req, res) => {
+app.delete('/v1/projects/:id', guard('project.delete'), wrap((req, res) => {
   res.json({ ok: projects.deleteProject(req.params.id) });
 }));
 
-app.get('/v1/metrics', (_req, res) => res.json(store.getMetrics()));
+app.get('/v1/metrics', guard('project.read'), (_req, res) => res.json(store.getMetrics()));
 
 /* ------------------------------------------------------------ databases */
-app.get('/v1/databases/collections', (_req, res) => res.json({ total: store.listCollections().length, collections: store.listCollections() }));
+app.get('/v1/databases/collections', guard('databases.read'), (_req, res) => res.json({ total: store.listCollections().length, collections: store.listCollections() }));
 
-app.post('/v1/databases/collections', wrap((req, res) => {
+app.post('/v1/databases/collections', guard('databases.write'), wrap((req, res) => {
   const c = store.createCollection(req.body || {});
   res.status(201).json(c);
 }));
 
-app.get('/v1/databases/collections/:id', wrap((req, res) => {
+app.get('/v1/databases/collections/:id', guard('databases.read'), wrap((req, res) => {
   const c = store.getCollection(req.params.id);
   if (!c) return fail(res, new Error('Collection not found'), 404);
   res.json(c);
 }));
 
-app.patch('/v1/databases/collections/:id', wrap((req, res) => {
+app.patch('/v1/databases/collections/:id', guard('databases.write'), wrap((req, res) => {
   const c = store.updateCollection(req.params.id, req.body || {});
   if (!c) return fail(res, new Error('Collection not found'), 404);
   res.json(c);
 }));
 
-app.delete('/v1/databases/collections/:id', wrap((req, res) => {
+app.delete('/v1/databases/collections/:id', guard('databases.write'), wrap((req, res) => {
   const ok = store.deleteCollection(req.params.id);
   res.json({ ok });
 }));
 
-app.post('/v1/databases/collections/:id/attributes', wrap((req, res) => {
+app.post('/v1/databases/collections/:id/attributes', guard('databases.write'), wrap((req, res) => {
   const a = store.addAttribute(req.params.id, req.body || {});
   res.status(201).json(a);
 }));
 
-app.delete('/v1/databases/collections/:id/attributes/:attrId', wrap((req, res) => {
+app.delete('/v1/databases/collections/:id/attributes/:attrId', guard('databases.write'), wrap((req, res) => {
   const ok = store.deleteAttribute(req.params.id, req.params.attrId);
   res.json({ ok });
 }));
 
-app.get('/v1/databases/collections/:id/documents', wrap((req, res) => {
+app.get('/v1/databases/collections/:id/documents', guard('databases.read'), wrap((req, res) => {
   const r = store.listDocuments(req.params.id, {
     limit: Number(req.query.limit) || 25,
     offset: Number(req.query.offset) || 0,
@@ -145,41 +181,41 @@ app.get('/v1/databases/collections/:id/documents', wrap((req, res) => {
   res.json(r);
 }));
 
-app.post('/v1/databases/collections/:id/documents', wrap((req, res) => {
+app.post('/v1/databases/collections/:id/documents', guard('databases.write'), wrap((req, res) => {
   const d = store.createDocument(req.params.id, req.body?.data ?? req.body, req.body?.documentId, req.body?.permissions);
   res.status(201).json(d);
 }));
 
-app.get('/v1/databases/collections/:id/documents/:docId', wrap((req, res) => {
+app.get('/v1/databases/collections/:id/documents/:docId', guard('databases.read'), wrap((req, res) => {
   const d = store.getDocument(req.params.id, req.params.docId);
   if (!d) return fail(res, new Error('Document not found'), 404);
   res.json(d);
 }));
 
-app.patch('/v1/databases/collections/:id/documents/:docId', wrap((req, res) => {
+app.patch('/v1/databases/collections/:id/documents/:docId', guard('databases.write'), wrap((req, res) => {
   const d = store.updateDocument(req.params.id, req.params.docId, req.body?.data ?? req.body);
   if (!d) return fail(res, new Error('Document not found'), 404);
   res.json(d);
 }));
 
-app.delete('/v1/databases/collections/:id/documents/:docId', wrap((req, res) => {
+app.delete('/v1/databases/collections/:id/documents/:docId', guard('databases.write'), wrap((req, res) => {
   res.json({ ok: store.deleteDocument(req.params.id, req.params.docId) });
 }));
 
 /* -------------------------------------------------------------- storage */
-app.get('/v1/storage/buckets', (_req, res) => res.json({ total: store.listBuckets().length, buckets: store.listBuckets() }));
+app.get('/v1/storage/buckets', guard('storage.read'), (_req, res) => res.json({ total: store.listBuckets().length, buckets: store.listBuckets() }));
 
-app.post('/v1/storage/buckets', wrap((req, res) => {
+app.post('/v1/storage/buckets', guard('storage.write'), wrap((req, res) => {
   res.status(201).json(store.createBucket(req.body || {}));
 }));
 
-app.delete('/v1/storage/buckets/:id', wrap((req, res) => res.json({ ok: store.deleteBucket(req.params.id) })));
+app.delete('/v1/storage/buckets/:id', guard('storage.write'), wrap((req, res) => res.json({ ok: store.deleteBucket(req.params.id) })));
 
-app.get('/v1/storage/buckets/:id/files', wrap((req, res) => {
+app.get('/v1/storage/buckets/:id/files', guard('storage.read'), wrap((req, res) => {
   res.json({ total: store.listFiles(req.params.id).length, files: store.listFiles(req.params.id) });
 }));
 
-app.post('/v1/storage/buckets/:id/files', upload.single('file'), wrap((req, res) => {
+app.post('/v1/storage/buckets/:id/files', guard('storage.write'), upload.single('file'), wrap((req, res) => {
   if (!req.file) return fail(res, new Error('No file uploaded'));
   res.status(201).json(store.saveFile(req.params.id, req.file));
 }));
@@ -192,59 +228,59 @@ app.get('/v1/storage/files/:fileId/view', wrap((req, res) => {
   fs.createReadStream(f.path).pipe(res);
 }));
 
-app.delete('/v1/storage/files/:fileId', wrap((req, res) => res.json({ ok: store.deleteFile(req.params.fileId) })));
+app.delete('/v1/storage/files/:fileId', guard('storage.write'), wrap((req, res) => res.json({ ok: store.deleteFile(req.params.fileId) })));
 
 /* ------------------------------------------------------------ functions */
-app.get('/v1/functions', (_req, res) => res.json({ total: store.listFunctions().length, functions: store.listFunctions() }));
+app.get('/v1/functions', guard('functions.read'), (_req, res) => res.json({ total: store.listFunctions().length, functions: store.listFunctions() }));
 
-app.post('/v1/functions', wrap((req, res) => res.status(201).json(store.createFunction(req.body || {}))));
+app.post('/v1/functions', guard('functions.write'), wrap((req, res) => res.status(201).json(store.createFunction(req.body || {}))));
 
-app.get('/v1/functions/:id', wrap((req, res) => {
+app.get('/v1/functions/:id', guard('functions.read'), wrap((req, res) => {
   const f = store.getFunction(req.params.id);
   if (!f) return fail(res, new Error('Function not found'), 404);
   const desc = db.prepare('SELECT value FROM settings WHERE key=?').get('fn_desc_' + f.id) as any;
   res.json({ ...f, description: desc?.value || '' });
 }));
 
-app.patch('/v1/functions/:id', wrap((req, res) => {
+app.patch('/v1/functions/:id', guard('functions.write'), wrap((req, res) => {
   const f = store.updateFunction(req.params.id, req.body || {});
   if (!f) return fail(res, new Error('Function not found'), 404);
   res.json(f);
 }));
 
-app.delete('/v1/functions/:id', wrap((req, res) => res.json({ ok: store.deleteFunction(req.params.id) })));
+app.delete('/v1/functions/:id', guard('functions.write'), wrap((req, res) => res.json({ ok: store.deleteFunction(req.params.id) })));
 
-app.post('/v1/functions/:id/executions', wrap(async (req, res) => {
+app.post('/v1/functions/:id/executions', guard('functions.execute'), wrap(async (req, res) => {
   const r = await store.executeFunction(req.params.id, req.body ?? {}, 'manual');
   res.json(r);
 }));
 
-app.get('/v1/functions/:id/executions', wrap((req, res) => {
+app.get('/v1/functions/:id/executions', guard('functions.read'), wrap((req, res) => {
   res.json({ total: 0, executions: store.listExecutions(req.params.id, 20) });
 }));
 
-app.get('/v1/executions', (_req, res) => res.json({ executions: store.listExecutions(undefined, 30) }));
+app.get('/v1/executions', guard('functions.read'), (_req, res) => res.json({ executions: store.listExecutions(undefined, 30) }));
 
 /* ---------------------------------------------------------------- sites */
-app.get('/v1/sites', (_req, res) => res.json({ total: store.listSites().length, sites: store.listSites() }));
+app.get('/v1/sites', guard('sites.read'), (_req, res) => res.json({ total: store.listSites().length, sites: store.listSites() }));
 
-app.post('/v1/sites', wrap((req, res) => res.status(201).json(store.createSite(req.body || {}))));
+app.post('/v1/sites', guard('sites.write'), wrap((req, res) => res.status(201).json(store.createSite(req.body || {}))));
 
-app.get('/v1/sites/:id', wrap((req, res) => {
+app.get('/v1/sites/:id', guard('sites.read'), wrap((req, res) => {
   const s = store.getSite(req.params.id);
   if (!s) return fail(res, new Error('Site not found'), 404);
   res.json(s);
 }));
 
-app.patch('/v1/sites/:id', wrap((req, res) => {
+app.patch('/v1/sites/:id', guard('sites.write'), wrap((req, res) => {
   const s = store.updateSite(req.params.id, req.body || {});
   if (!s) return fail(res, new Error('Site not found'), 404);
   res.json(s);
 }));
 
-app.delete('/v1/sites/:id', wrap((req, res) => res.json({ ok: store.deleteSite(req.params.id) })));
+app.delete('/v1/sites/:id', guard('sites.write'), wrap((req, res) => res.json({ ok: store.deleteSite(req.params.id) })));
 
-app.post('/v1/sites/:id/deployments', wrap((req, res) => {
+app.post('/v1/sites/:id/deployments', guard('sites.deploy'), wrap((req, res) => {
   const s = store.deploySite(req.params.id);
   if (!s) return fail(res, new Error('Site not found'), 404);
   res.json(s);
@@ -269,22 +305,22 @@ app.get('/v1/sites/:id/preview', serveSite);
 app.get('/v1/sites/:id/preview/*', serveSite);
 
 /* ---------------------------------------------------------------- users */
-app.get('/v1/users', wrap((req, res) => {
+app.get('/v1/users', guard('users.read'), wrap((req, res) => {
   let users = store.listUsers();
   const q = String(req.query.search || '').toLowerCase();
   if (q) users = users.filter((u) => u.name.toLowerCase().includes(q) || u.email.includes(q));
   res.json({ total: users.length, users });
 }));
 
-app.post('/v1/users', wrap((req, res) => res.status(201).json(store.createUser(req.body || {}))));
+app.post('/v1/users', guard('users.write'), wrap((req, res) => res.status(201).json(store.createUser(req.body || {}))));
 
-app.patch('/v1/users/:id', wrap((req, res) => {
+app.patch('/v1/users/:id', guard('users.write'), wrap((req, res) => {
   const u = store.updateUser(req.params.id, req.body || {});
   if (!u) return fail(res, new Error('User not found'), 404);
   res.json(u);
 }));
 
-app.delete('/v1/users/:id', wrap((req, res) => res.json({ ok: store.deleteUser(req.params.id) })));
+app.delete('/v1/users/:id', guard('users.write'), wrap((req, res) => res.json({ ok: store.deleteUser(req.params.id) })));
 
 app.post('/v1/account/sessions', wrap((req, res) => {
   const { email, password } = req.body || {};
@@ -292,20 +328,20 @@ app.post('/v1/account/sessions', wrap((req, res) => {
 }));
 
 /* ------------------------------------------------------------- messaging */
-app.get('/v1/messaging/messages', (_req, res) => res.json({ messages: store.listMessages() }));
+app.get('/v1/messaging/messages', guard('messaging.read'), (_req, res) => res.json({ messages: store.listMessages() }));
 
-app.post('/v1/messaging/messages', wrap((req, res) => {
+app.post('/v1/messaging/messages', guard('messaging.write'), wrap((req, res) => {
   const m = store.sendMessage(req.body || {});
   res.status(201).json(m);
 }));
 
 /* -------------------------------------------------------------- api keys */
-app.get('/v1/api-keys', (_req, res) => res.json({ keys: store.listApiKeys() }));
-app.post('/v1/api-keys', wrap((req, res) => res.status(201).json(store.createApiKey(req.body?.name || 'New key', req.body?.scopes || []))));
-app.delete('/v1/api-keys/:id', wrap((req, res) => res.json({ ok: store.deleteApiKey(req.params.id) })));
+app.get('/v1/api-keys', guard('keys.read'), (_req, res) => res.json({ keys: store.listApiKeys() }));
+app.post('/v1/api-keys', guard('keys.write'), wrap((req, res) => res.status(201).json(store.createApiKey(req.body?.name || 'New key', req.body?.scopes || []))));
+app.delete('/v1/api-keys/:id', guard('keys.write'), wrap((req, res) => res.json({ ok: store.deleteApiKey(req.params.id) })));
 
 /* ------------------------------------------------------------------ logs */
-app.get('/v1/logs', (req, res) => {
+app.get('/v1/logs', guard('logs.read'), (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 60, 200);
   res.json({ logs: store.listLogs(limit) });
 });

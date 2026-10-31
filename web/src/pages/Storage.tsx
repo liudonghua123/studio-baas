@@ -7,9 +7,11 @@ import { api } from '../api';
 import type { Bucket, FileItem } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtBytes, fmtDateTime, timeAgo } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 export default function Storage() {
   const toast = useToast();
+  const { can } = useAuth();
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [active, setActive] = useState<Bucket | null>(null);
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -77,7 +79,7 @@ export default function Storage() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={() => { load(); loadFiles(active); }}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn ghost" onClick={() => setNewBucket(true)}><Plus size={14} /> New bucket</button>
+          <button className="btn ghost" disabled={!can('storage.write')} onClick={() => setNewBucket(true)}><Plus size={14} /> New bucket</button>
           <button className="btn primary" disabled={!active || busy} onClick={() => inputRef.current?.click()}>
             <UploadCloud size={14} /> {busy ? 'Uploading…' : 'Upload file'}
           </button>

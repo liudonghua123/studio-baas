@@ -708,7 +708,10 @@ export function getMetrics() {
     functions: (db.prepare('SELECT COUNT(*) c FROM functions WHERE projectId=?').get(projectId) as any).c,
     executions24h: execs24,
     failedExecutions: failed,
-    users: (db.prepare('SELECT COUNT(*) c FROM users').get() as any).c,
+    users: (() => {
+      try { return (db.prepare('SELECT COUNT(*) c FROM members WHERE projectId=?').get(projectId) as any).c; }
+      catch { return (db.prepare('SELECT COUNT(*) c FROM users').get() as any).c; }
+    })(),
     sites: (db.prepare('SELECT COUNT(*) c FROM sites WHERE projectId=?').get(projectId) as any).c,
     collections: (db.prepare('SELECT COUNT(*) c FROM collections WHERE projectId=?').get(projectId) as any).c,
     messages: (db.prepare('SELECT COUNT(*) c FROM messages WHERE projectId=?').get(projectId) as any).c,

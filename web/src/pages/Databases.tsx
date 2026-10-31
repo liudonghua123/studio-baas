@@ -9,6 +9,7 @@ import { api } from '../api';
 import type { Attribute, Collection, Doc } from '../types';
 import { Badge, CopyButton, Drawer, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDateTime, pretty, statusTone } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 const ICONS: Record<string, string> = { package: '📦', 'shopping-bag': '🛍️', users: '👥', 'file-text': '📄', database: '🗄️' };
 const TYPE_ICON: Record<string, any> = {
@@ -20,6 +21,7 @@ export default function Databases() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const { can } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [active, setActive] = useState<Collection | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -180,7 +182,7 @@ export default function Databases() {
             ))}
           </div>
           <div style={{ padding: 8, borderTop: '1px solid var(--line)' }}>
-            <button className="btn ghost sm" style={{ width: '100%' }} onClick={() => setNewCol(true)}><Plus size={12} /> New collection</button>
+            <button className="btn ghost sm" style={{ width: '100%' }} disabled={!can('databases.write')} title={can('databases.write') ? '' : '需要 developer 及以上角色'} onClick={() => setNewCol(true)}><Plus size={12} /> New collection</button>
           </div>
         </div>
 
@@ -231,7 +233,7 @@ export default function Databases() {
                   </div>
                   <span className="tiny dim" style={{ marginLeft: 4 }}>{total} total</span>
                   <div className="toolbar-spacer" />
-                  <button className="btn sm primary" onClick={openCreate}><Plus size={12} /> Add document</button>
+                  <button className="btn sm primary" disabled={!can('databases.write')} onClick={openCreate}><Plus size={12} /> Add document</button>
                 </div>
 
                 <div className="card-body tight" style={{ overflowX: 'auto' }}>

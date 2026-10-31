@@ -5,6 +5,7 @@ import { api } from '../api';
 import type { Execution, FunctionDef } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo, fmtDuration } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 const TEMPLATES: Record<string, string> = {
   'Hello world': `export default async ({ req, res, log }) => {
@@ -31,6 +32,7 @@ export default function Functions() {
   const [form, setForm] = useState({ name: '', template: 'Hello world' });
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { can } = useAuth();
   const nav = useNavigate();
 
   const load = async () => {
@@ -64,7 +66,7 @@ export default function Functions() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={load}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn primary" onClick={() => setOpen(true)}><Plus size={14} /> Create function</button>
+          <button className="btn primary" disabled={!can('functions.write')} onClick={() => setOpen(true)}><Plus size={14} /> Create function</button>
         </div>
       </div>
 

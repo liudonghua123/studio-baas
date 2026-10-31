@@ -9,11 +9,13 @@ import type { Execution, FunctionDef } from '../types';
 import CodeEditor from '../components/CodeEditor';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDuration, statusTone, timeAgo, fmtDateTime } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 export default function FunctionDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const { can } = useAuth();
   const [fn, setFn] = useState<FunctionDef | null>(null);
   const [code, setCode] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -122,8 +124,8 @@ export default function FunctionDetail() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={() => setSettingsOpen(true)}><Settings2 size={14} /> Settings</button>
-          <button className="btn" onClick={() => save()} disabled={saving || !dirty}><Save size={14} /> {saving ? 'Saving…' : 'Save code'}</button>
-          <button className="btn primary" onClick={() => setPayloadOpen(true)}><Play size={14} /> Execute</button>
+          <button className="btn" onClick={() => save()} disabled={saving || !dirty || !can('functions.write')}><Save size={14} /> {saving ? 'Saving…' : 'Save code'}</button>
+          <button className="btn primary" disabled={!can('functions.execute')} onClick={() => setPayloadOpen(true)}><Play size={14} /> Execute</button>
         </div>
       </div>
 

@@ -48,6 +48,14 @@ export interface User {
   id: string; name: string; email: string; status: string; emailVerified: boolean;
   labels: string[]; prefs: Record<string, any>; createdAt: string; lastLoginAt: string | null;
 }
+export interface Member {
+  id: string; projectId: string; userId: string; name: string; email: string;
+  avatarColor: string; role: string; status: string; addedAt: string;
+}
+export interface Me {
+  principal: { type: string; id: string; name: string; role?: string; scopes?: string[] };
+  projectId: string; role: string; permissions: string[];
+}
 export interface Message {
   id: string; channel: string; recipient: string; subject: string; body: string;
   status: string; createdAt: string;

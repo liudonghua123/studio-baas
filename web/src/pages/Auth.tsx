@@ -4,6 +4,7 @@ import { api } from '../api';
 import type { User } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDate, initials, statusTone, timeAgo } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 export default function Auth() {
   const [users, setUsers] = useState<User[]>([]);
@@ -14,6 +15,7 @@ export default function Auth() {
   const [form, setForm] = useState({ name: '', email: '', password: '', labels: '' });
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { can } = useAuth();
 
   const load = async (q = search) => {
     try { setUsers((await api.users(q)).users); } catch (e: any) { toast.push(e.message, 'err'); }
@@ -60,7 +62,7 @@ export default function Auth() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={() => load()}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn primary" onClick={() => setOpen(true)}><UserPlus size={14} /> Create user</button>
+          <button className="btn primary" disabled={!can('users.write')} onClick={() => setOpen(true)}><UserPlus size={14} /> Create user</button>
         </div>
       </div>
 

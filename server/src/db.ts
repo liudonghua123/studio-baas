@@ -85,6 +85,10 @@ export function migrate() {
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT
   );
+  CREATE TABLE IF NOT EXISTS members (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, userId TEXT NOT NULL, role TEXT NOT NULL,
+    createdAt TEXT NOT NULL, UNIQUE(projectId, userId)
+  );
   CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY, name TEXT, provider TEXT, model TEXT, systemPrompt TEXT,
     tools TEXT, createdAt TEXT NOT NULL
@@ -92,6 +96,8 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_docs_col ON documents(collectionId);
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
+  CREATE INDEX IF NOT EXISTS idx_members_project ON members(projectId);
+  CREATE INDEX IF NOT EXISTS idx_members_user ON members(userId);
   `);
 
   /* ------------------------------------------- project scoping columns */

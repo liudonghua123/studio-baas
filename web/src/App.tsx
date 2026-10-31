@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/ui';
+import { AuthProvider } from './lib/auth';
 import Overview from './pages/Overview';
 import Databases from './pages/Databases';
 import Storage from './pages/Storage';
@@ -15,11 +16,13 @@ import Settings from './pages/Settings';
 import Docs from './pages/Docs';
 import AI from './pages/AI';
 import Projects from './pages/Projects';
+import Members from './pages/Members';
 
 export default function App() {
   return (
     <BrowserRouter>
       <ToastProvider>
+        <AuthProvider>
         <Layout>
           <Routes>
             <Route path="/" element={<Overview />} />
@@ -34,12 +37,14 @@ export default function App() {
             <Route path="/messaging" element={<Messaging />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/projects" element={<Projects />} />
+            <Route path="/members" element={<Members />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/docs" element={<Docs />} />
             <Route path="/ai" element={<AI />} />
             <Route path="*" element={<Overview />} />
           </Routes>
         </Layout>
+        </AuthProvider>
       </ToastProvider>
     </BrowserRouter>
   );

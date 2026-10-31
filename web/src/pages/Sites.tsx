@@ -5,6 +5,7 @@ import { api } from '../api';
 import type { Site } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo } from '../lib/format';
+import { useAuth } from '../lib/auth';
 
 export default function Sites() {
   const [sites, setSites] = useState<Site[]>([]);
@@ -13,6 +14,7 @@ export default function Sites() {
   const [form, setForm] = useState({ name: '', framework: 'static' });
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { can } = useAuth();
   const nav = useNavigate();
 
   const load = async () => {
@@ -42,7 +44,7 @@ export default function Sites() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={load}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn primary" onClick={() => setOpen(true)}><Plus size={14} /> Create site</button>
+          <button className="btn primary" disabled={!can('sites.write')} onClick={() => setOpen(true)}><Plus size={14} /> Create site</button>
         </div>
       </div>
 
