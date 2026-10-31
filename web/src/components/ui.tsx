@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertCircle, Check, Copy, Inbox, X } from 'lucide-react';
+import { useT } from '../lib/locale';
 
 /* ------------------------------------------------------------------- toast */
 
@@ -127,6 +128,7 @@ export function Loading({ rows = 3 }: { rows?: number }) {
 /* -------------------------------------------------------------- copy button */
 
 export function CopyButton({ text, label }: { text: string; label?: string }) {
+  const t = useT();
   const [done, setDone] = useState(false);
   return (
     <button
@@ -138,7 +140,7 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
       }}
     >
       {done ? <Check size={12} /> : <Copy size={12} />}
-      {label && <span>{done ? '已复制' : label}</span>}
+      {label && <span>{done ? t('Copied') : label}</span>}
     </button>
   );
 }

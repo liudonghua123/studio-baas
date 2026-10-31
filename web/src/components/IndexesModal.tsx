@@ -5,6 +5,7 @@ import type { Collection, CollectionIndex, QueryPlan } from '../types';
 import { Badge, Empty, Modal, useToast } from './ui';
 import { useAuth } from '../lib/auth';
 import { timeAgo } from '../lib/format';
+import { useT } from '../lib/locale';
 
 const META_ATTRS = ['$id', '$createdAt', '$updatedAt'];
 
@@ -22,6 +23,7 @@ export default function IndexesModal({
   onChanged?: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const { can } = useAuth();
   const writable = can('databases.write');
 
@@ -74,7 +76,7 @@ export default function IndexesModal({
 
   const create = async () => {
     if (!collection) return;
-    if (!key.trim() || !picked.length) { toast.push('A key and at least one attribute are required', 'err'); return; }
+    if (!key.trim() || !picked.length) { toast.push(t('A key and at least one attribute are required'), 'err'); return; }
     setBusy(true);
     try {
       const idx = await api.createIndex(collection.id, {
@@ -82,9 +84,9 @@ export default function IndexesModal({
         orders: picked.map((a) => dirs[a] || 'ASC'),
       });
       if (idx.status === 'failed') {
-        toast.push(`Index saved but not built: ${idx.error}`, 'err');
+        toast.push(t('Index saved but not built: {error}', { error: idx.error ?? '' }), 'err');
       } else {
-        toast.push(`Index "${idx.key}" is available`);
+        toast.push(t('Index “{key}” is available', { key: idx.key }));
       }
       setKey(''); setPicked([]); setDirs({});
       await load();
@@ -97,7 +99,7 @@ export default function IndexesModal({
     if (!collection) return;
     try {
       await api.deleteIndex(collection.id, idx.id);
-      toast.push(`Index "${idx.key}" dropped`);
+      toast.push(t('Index “{key}” dropped', { key: idx.key }));
       await load();
       onChanged?.();
     } catch (e: any) { toast.push(e.message, 'err'); }
@@ -122,30 +124,30 @@ export default function IndexesModal({
       : { tone: 'amber', label: 'Collection scan' };
 
   return (
-    <Modal open={open} onClose={onClose} title="Indexes"
+    <Modal open={open} onClose={onClose} title={t('Indexes')}
       subtitle={collection ? `${collection.name} · ${collection.key}` : ''} wide
     >
       <div className="tabs" style={{ marginBottom: 14 }}>
         <button className={`tab ${tab === 'indexes' ? 'active' : ''}`} onClick={() => setTab('indexes')}>
-          <KeyRound size={13} /> Indexes
+          <KeyRound size={13} /> {t('Indexes')}
         </button>
         <button className={`tab ${tab === 'plan' ? 'active' : ''}`} onClick={() => setTab('plan')}>
-          <Gauge size={13} /> Query plan
+          <Gauge size={13} /> {t('Query plan')}
         </button>
       </div>
 
       {tab === 'indexes' ? (
         <div className="stack">
-          <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+          <div className="card" style={{ background: 'var(--w1)' }}>
             <div className="card-body tight">
               <table className="table">
                 <thead>
-                  <tr><th>Key</th><th>Type</th><th>Attributes</th><th>Status</th><th style={{ width: 90 }}>Created</th><th /></tr>
+                  <tr><th>{t('Key')}</th><th>{t('Type')}</th><th>{t('Attributes')}</th><th>{t('Status')}</th><th style={{ width: 90 }}>{t('Created')}</th><th /></tr>
                 </thead>
                 <tbody>
                   {list.map((i) => (
                     <tr key={i.id}>
-                      <td className="mono" style={{ color: '#c4b5fd' }}>{i.key}</td>
+                      <td className="mono" style={{ color: 'var(--violet-text)' }}>{i.key}</td>
                       <td><Badge tone={i.type === 'unique' ? 'blue' : ''}>{i.type}</Badge></td>
                       <td className="mono tiny">
                         {i.attributes.map((a, n) => (
@@ -158,15 +160,15 @@ export default function IndexesModal({
                       </td>
                       <td>
                         {i.status === 'available'
-                          ? <Badge tone="green" dot>available</Badge>
-                          : <Badge tone="red" dot>failed</Badge>}
+                          ? <Badge tone="green" dot>{t('available')}</Badge>
+                          : <Badge tone="red" dot>{t('failed')}</Badge>}
                         {i.status === 'failed' && i.error && (
                           <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>{i.error}</div>
                         )}
                       </td>
                       <td className="dim tiny">{timeAgo(i.createdAt)}</td>
                       <td className="right">
-                        <button className="mini-btn danger" disabled={!writable} onClick={() => remove(i)} title="Drop index">
+                        <button className="mini-btn danger" disabled={!writable} onClick={() => remove(i)} title={t('Drop index')}>
                           <Trash2 size={12} />
                         </button>
                       </td>
@@ -174,7 +176,7 @@ export default function IndexesModal({
                   ))}
                   {!list.length && (
                     <tr><td colSpan={6} className="dim" style={{ textAlign: 'center', padding: 20 }}>
-                      No indexes — every filtered query scans the whole collection.
+                      {t('No indexes — every filtered query scans the whole collection.')}
                     </td></tr>
                   )}
                 </tbody>
@@ -183,15 +185,15 @@ export default function IndexesModal({
           </div>
 
           <div className="divider" />
-          <div className="section-title">New index</div>
+          <div className="section-title">{t('New index')}</div>
           <div className="input-row">
             <div className="field">
-              <label className="label">Key</label>
+              <label className="label">{t('Key')}</label>
               <input className="input mono" placeholder="status_total" value={key}
                 onChange={(e) => setKey(e.target.value)} />
             </div>
             <div className="field" style={{ maxWidth: 160 }}>
-              <label className="label">Type</label>
+              <label className="label">{t('Type')}</label>
               <select className="select" value={type} onChange={(e) => setType(e.target.value as 'key' | 'unique')}>
                 <option value="key">key</option>
                 <option value="unique">unique</option>
@@ -200,7 +202,7 @@ export default function IndexesModal({
           </div>
 
           <div className="field">
-            <label className="label">Attributes (order matters — leftmost is used first)</label>
+            <label className="label">{t('Attributes (order matters — leftmost is used first)')}</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {candidates.map((a) => {
                 const on = picked.includes(a);
@@ -216,7 +218,7 @@ export default function IndexesModal({
                       <span
                         role="button"
                         tabIndex={0}
-                        title="Toggle sort direction"
+                        title={t('Toggle sort direction')}
                         style={{ marginLeft: 4, opacity: 0.7 }}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -229,36 +231,37 @@ export default function IndexesModal({
                   </button>
                 );
               })}
-              {!candidates.length && <span className="tiny dim">Add an attribute first.</span>}
+              {!candidates.length && <span className="tiny dim">{t('Add an attribute first.')}</span>}
             </div>
             <div className="hint" style={{ marginTop: 6 }}>
-              A composite index serves filters on its <i>prefix</i>: <code className="mono">(status, total)</code> helps
-              <code className="mono"> equal("status")</code> and <code className="mono">equal("status") + greaterThan("total")</code>,
-              but not <code className="mono">greaterThan("total")</code> alone. Unique indexes reject duplicate values inside this collection only.
+              {t('A composite index serves filters on its')} <i>{t('prefix')}</i>: <code className="mono">(status, total)</code>{' '}
+              {t('accelerates')} <code className="mono">equal("status")</code> {t('and')}{' '}
+              <code className="mono">equal("status") + greaterThan("total")</code>{t(', but')}{' '}
+              <code className="mono">greaterThan("total")</code> {t('on its own is not served. Unique indexes reject duplicate values inside this collection only.')}
             </div>
           </div>
 
           <div className="flex" style={{ justifyContent: 'flex-end' }}>
             <button className="btn primary" disabled={!writable || busy} onClick={create}>
-              <Plus size={13} /> {busy ? 'Building…' : 'Create index'}
+              <Plus size={13} /> {busy ? t('Building…') : t('Create index')}
             </button>
           </div>
         </div>
       ) : (
         <div className="stack">
           <div className="field">
-            <label className="label">Query (one Appwrite query per line)</label>
+            <label className="label">{t('Query (one Appwrite query per line)')}</label>
             <textarea className="input mono" rows={3} value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
               placeholder={'equal("status","paid")\ngreaterThan("total",300)\norderDesc("$createdAt")'} />
-            <div className="hint">This runs <span className="mono">EXPLAIN QUERY PLAN</span> on the exact SQL the list endpoint would execute.</div>
+            <div className="hint">{t('This runs the same')} <span className="mono">EXPLAIN QUERY PLAN</span> {t('the list endpoint would execute.')}</div>
           </div>
           <div className="flex">
             <button className="btn primary" onClick={runPlan} disabled={planBusy}>
-              <Search size={13} /> {planBusy ? 'Explaining…' : 'Explain'}
+              <Search size={13} /> {planBusy ? t('Explaining…') : t('Explain')}
             </button>
             {collection?.attributes?.length ? (
-              <span className="tiny dim">Try: {collection.attributes.slice(0, 3).map((a) => `equal("${a.key}","…")`).join(' · ')}</span>
+              <span className="tiny dim">{t('Try: {queries}', { queries: collection.attributes.slice(0, 3).map((a) => `equal("${a.key}","…")`).join(' · ') })}</span>
             ) : null}
           </div>
 
@@ -270,24 +273,24 @@ export default function IndexesModal({
 
           {plan && (
             <>
-              <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div className="card" style={{ background: 'var(--w1)' }}>
                 <div className="card-body">
                   <div className="flex" style={{ gap: 10 }}>
-                    <Badge tone={verdict(plan).tone} dot>{verdict(plan).label}</Badge>
+                    <Badge tone={verdict(plan).tone} dot>{t(verdict(plan).label)}</Badge>
                     {plan.index && <span className="mono tiny">{plan.index}</span>}
-                    {plan.tempBTree && <Badge tone="amber"><AlertTriangle size={10} /> temp B-tree sort</Badge>}
+                    {plan.tempBTree && <Badge tone="amber"><AlertTriangle size={10} /> {t('temp B-tree sort')}</Badge>}
                   </div>
                   <div className="tiny dim" style={{ marginTop: 8 }}>
                     {plan.fullScan
-                      ? 'No index matched — SQLite reads every document in the collection.'
+                      ? t('No index matched — SQLite reads every document in the collection.')
                       : plan.narrowed
-                        ? `Index conditions: ${plan.terms.join(' · ')}`
-                        : 'Only collectionId is served by the index, so the whole collection is still scanned. Add an index that starts with your filter attribute.'}
+                        ? t('Index conditions: {terms}', { terms: plan.terms.join(' · ') })
+                        : t('Only collectionId is served by the index, so the whole collection is still scanned. Add an index that starts with your filter attribute.')}
                   </div>
                 </div>
               </div>
 
-              <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div className="card" style={{ background: 'var(--w1)' }}>
                 <div className="card-body tight">
                   <table className="table">
                     <thead><tr><th style={{ width: 44 }}>id</th><th style={{ width: 60 }}>parent</th><th>detail</th></tr></thead>
@@ -299,7 +302,7 @@ export default function IndexesModal({
                           <td className="mono tiny">{s.detail}</td>
                         </tr>
                       ))}
-                      {!plan.plan.length && <tr><td colSpan={3} className="dim" style={{ textAlign: 'center', padding: 16 }}>No plan rows</td></tr>}
+                      {!plan.plan.length && <tr><td colSpan={3} className="dim" style={{ textAlign: 'center', padding: 16 }}>{t('No plan rows')}</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -312,7 +315,7 @@ export default function IndexesModal({
           )}
 
           {!plan && !planError && (
-            <Empty title="No plan yet" hint="Run Explain to see whether the query can use an index." icon={<Gauge size={22} />} />
+            <Empty title={t('No plan yet')} hint={t('Run Explain to see whether the query can use an index.')} icon={<Gauge size={22} />} />
           )}
         </div>
       )}

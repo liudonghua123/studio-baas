@@ -11,6 +11,7 @@ import type { Attribute, Collection, Doc } from '../types';
 import { Badge, CopyButton, Drawer, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDateTime, pretty, statusTone } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import { useT } from '../lib/locale';
 
 const ICONS: Record<string, string> = { package: '📦', 'shopping-bag': '🛍️', users: '👥', 'file-text': '📄', database: '🗄️' };
 const TYPE_ICON: Record<string, any> = {
@@ -24,6 +25,7 @@ export default function Databases() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
+  const t = useT();
   const { can, me } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [active, setActive] = useState<Collection | null>(null);
@@ -104,7 +106,7 @@ export default function Databases() {
     if (!active) return;
     try {
       const c = await api.updateCollection(active.id, { documentSecurity: !active.documentSecurity });
-      toast.push(`Document-level security ${c.documentSecurity ? 'enabled' : 'disabled'}`);
+      toast.push(c.documentSecurity ? t('Document-level security enabled') : t('Document-level security disabled'));
       await loadCollections();
       await loadDocs();
     } catch (e: any) { toast.push(e.message, 'err'); }
@@ -128,7 +130,7 @@ export default function Databases() {
       }
       setFieldErrors(errs);
       if (Object.keys(errs).length) {
-        toast.push(`${Object.keys(errs).length} field(s) need attention`, 'err');
+        toast.push(t('{n} field(s) need attention', { n: Object.keys(errs).length }), 'err');
         return;
       }
     }
@@ -136,14 +138,14 @@ export default function Databases() {
     try {
       let payload = docData;
       if (jsonMode) {
-        try { payload = JSON.parse(jsonText); } catch { throw new Error('Invalid JSON payload'); }
+        try { payload = JSON.parse(jsonText); } catch { throw new Error(t('Invalid JSON payload')); }
       }
       if (editing) {
         await api.updateDocument(active.id, editing.id, payload, active.documentSecurity ? parsePerms() : undefined);
-        toast.push('Document updated');
+        toast.push(t('Document updated'));
       } else {
         await api.createDocument(active.id, payload, active.documentSecurity ? parsePerms() : undefined);
-        toast.push('Document created');
+        toast.push(t('Document created'));
       }
       setDocDrawer(null);
       loadDocs();
@@ -156,7 +158,7 @@ export default function Databases() {
     setSaving(true);
     try {
       const c = await api.createCollection(colForm);
-      toast.push(`Collection "${c.name}" created`);
+      toast.push(t('Collection “{name}” created', { name: c.name }));
       setNewCol(false);
       setColForm({ name: '', key: '', icon: 'database', color: '#6C5CE7', documentSecurity: false });
       await loadCollections();
@@ -170,13 +172,13 @@ export default function Databases() {
     try {
       if (confirm.type === 'collection') {
         await api.deleteCollection(confirm.id);
-        toast.push('Collection deleted');
+        toast.push(t('Collection deleted'));
         setActive(null);
         nav('/databases');
         await loadCollections();
       } else if (active) {
         await api.deleteDocument(active.id, confirm.id);
-        toast.push('Document deleted');
+        toast.push(t('Document deleted'));
         loadDocs();
         loadCollections();
       }
@@ -190,20 +192,20 @@ export default function Databases() {
     <div className="page">
       <div className="page-head">
         <div>
-          <div className="eyebrow"><Database size={11} /> Databases</div>
-          <h1>Collections</h1>
-          <p>Model your data with typed attributes, document-level permissions and instant REST APIs.</p>
+          <div className="eyebrow"><Database size={11} /> {t('Databases')}</div>
+          <h1>{t('Collections')}</h1>
+          <p>{t('Model your data with typed attributes, document-level permissions and instant REST APIs.')}</p>
         </div>
         <div className="page-actions">
-          <button className="btn ghost" onClick={() => loadDocs()}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn primary" onClick={() => setNewCol(true)}><Plus size={14} /> Create collection</button>
+          <button className="btn ghost" onClick={() => loadDocs()}><RefreshCw size={14} /> {t('Refresh')}</button>
+          <button className="btn primary" onClick={() => setNewCol(true)}><Plus size={14} /> {t('Create collection')}</button>
         </div>
       </div>
 
       <div className="split-3">
         <div className="card" style={{ position: 'sticky', top: 12 }}>
           <div className="card-head" style={{ padding: '12px 14px' }}>
-            <div className="card-title">All collections</div>
+            <div className="card-title">{t('All collections')}</div>
             <span className="badge" style={{ marginLeft: 'auto' }}>{collections.length}</span>
           </div>
           <div className="col-list">
@@ -223,13 +225,13 @@ export default function Databases() {
             ))}
           </div>
           <div style={{ padding: 8, borderTop: '1px solid var(--line)' }}>
-            <button className="btn ghost sm" style={{ width: '100%' }} disabled={!can('databases.write')} title={can('databases.write') ? '' : '需要 developer 及以上角色'} onClick={() => setNewCol(true)}><Plus size={12} /> New collection</button>
+            <button className="btn ghost sm" style={{ width: '100%' }} disabled={!can('databases.write')} title={can('databases.write') ? '' : t('Requires the developer role or above')} onClick={() => setNewCol(true)}><Plus size={12} /> {t('New collection')}</button>
           </div>
         </div>
 
         <div className="stack">
           {loading ? <div className="card"><Loading /></div> : !active ? (
-            <div className="card"><Empty title="No collections yet" hint="Create your first collection to start modeling data." icon={<Database size={26} />} /></div>
+            <div className="card"><Empty title={t('No collections yet')} hint={t('Create your first collection to start modeling data.')} icon={<Database size={26} />} /></div>
           ) : (
             <>
               <div className="card">
@@ -240,12 +242,12 @@ export default function Databases() {
                   <div>
                     <div className="card-title" style={{ fontSize: 15 }}>{active.name}</div>
                     <div className="card-sub">
-                      <span className="mono">{active.key}</span> · {total} documents · {active.attributes?.length || 0} attributes
+                      <span className="mono">{active.key}</span> · {t('{n} documents', { n: total })} · {t('{n} attributes', { n: active.attributes?.length || 0 })}
                     </div>
                   </div>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    <button className="btn sm ghost" onClick={() => setAttrModal(true)}><SlidersHorizontal size={12} /> Attributes</button>
-                    <button className="btn sm ghost" onClick={() => setIdxModal(true)}><KeyRound size={12} /> Indexes</button>
+                    <button className="btn sm ghost" onClick={() => setAttrModal(true)}><SlidersHorizontal size={12} /> {t('Attributes')}</button>
+                    <button className="btn sm ghost" onClick={() => setIdxModal(true)}><KeyRound size={12} /> {t('Indexes')}</button>
                     <button className="btn sm danger" onClick={() => setConfirm({ type: 'collection', id: active.id, name: active.name })}>
                       <Trash2 size={12} />
                     </button>
@@ -261,18 +263,18 @@ export default function Databases() {
                       </span>
                     );
                   })}
-                  {!active.attributes?.length && <span className="tiny dim">No attributes — add one to start storing data.</span>}
+                  {!active.attributes?.length && <span className="tiny dim">{t('No attributes — add one to start storing data.')}</span>}
                   <button
                     className={`btn sm ${active.documentSecurity ? '' : 'ghost'}`}
                     style={{ marginLeft: 'auto' }}
                     onClick={toggleSecurity}
                     disabled={!can('databases.write')}
                     title={active.documentSecurity
-                      ? 'Each document decides who can read / write it'
-                      : 'Access is decided by the project role only'}
+                      ? t('Each document decides who can read / write it')
+                      : t('Access is decided by the project role only')}
                   >
                     {active.documentSecurity ? <ShieldCheck size={12} /> : <ShieldOff size={12} />}
-                    {active.documentSecurity ? 'Document security' : 'No document security'}
+                    {active.documentSecurity ? t('Document security') : t('No document security')}
                   </button>
                 </div>
 
@@ -280,26 +282,26 @@ export default function Databases() {
                   <div className="searchbox">
                     <Search size={13} />
                     <input
-                      className="input" placeholder="Search documents…" value={search}
+                      className="input" placeholder={t('Search documents…')} value={search}
                       onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                       style={{ border: 0, background: 'transparent', height: 28, padding: 0, fontSize: 12 }}
                     />
                   </div>
-                  <span className="tiny dim" style={{ marginLeft: 4 }}>{total} total</span>
+                  <span className="tiny dim" style={{ marginLeft: 4 }}>{t('{n} total', { n: total })}</span>
                   <div className="toolbar-spacer" />
-                  <button className="btn sm primary" disabled={!can('databases.write')} onClick={openCreate}><Plus size={12} /> Add document</button>
+                  <button className="btn sm primary" disabled={!can('databases.write')} onClick={openCreate}><Plus size={12} /> {t('Add document')}</button>
                 </div>
 
                 <div className="card-body tight" style={{ overflowX: 'auto' }}>
                   {docLoading ? <Loading rows={4} /> : docs.length === 0 ? (
-                    <Empty title="No documents" hint="Add a document or adjust your search." icon={<Rows3 size={24} />} />
+                    <Empty title={t('No documents')} hint={t('Add a document or adjust your search.')} icon={<Rows3 size={24} />} />
                   ) : (
                     <table className="table">
                       <thead>
                         <tr>
-                          <th style={{ width: 150 }}>Document ID</th>
+                          <th style={{ width: 150 }}>{t('Document ID')}</th>
                           {columns.map((c) => <th key={c.id}>{c.key}</th>)}
-                          <th style={{ width: 100 }}>Updated</th>
+                          <th style={{ width: 100 }}>{t('Updated')}</th>
                           <th style={{ width: 84 }} />
                         </tr>
                       </thead>
@@ -340,7 +342,7 @@ export default function Databases() {
                 </div>
 
                 <div className="flex" style={{ padding: '10px 14px', borderTop: '1px solid var(--line)' }}>
-                  <span className="tiny dim">Showing {docs.length ? page * LIMIT + 1 : 0}–{page * LIMIT + docs.length} of {total}</span>
+                  <span className="tiny dim">{t('Showing {from}–{to} of {total}', { from: docs.length ? page * LIMIT + 1 : 0, to: page * LIMIT + docs.length, total })}</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                     <button className="mini-btn" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}><ChevronLeft size={14} /></button>
                     <span className="tiny dim" style={{ padding: '0 6px', alignSelf: 'center' }}>{page + 1} / {pages}</span>
@@ -351,16 +353,16 @@ export default function Databases() {
 
               <div className="card">
                 <div className="card-head">
-                  <div className="card-title">REST endpoint</div>
-                  <Badge tone="green" dot>Live</Badge>
+                  <div className="card-title">{t('REST endpoint')}</div>
+                  <Badge tone="green" dot>{t('Live')}</Badge>
                 </div>
                 <div className="card-body" style={{ paddingTop: 12 }}>
                   <div className="flex" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <code className="mono" style={{ background: '#08080c', border: '1px solid var(--line)', padding: '7px 10px', borderRadius: 7, color: '#a5b4fc' }}>
+                    <code className="mono" style={{ background: 'var(--code-bg)', border: '1px solid var(--line)', padding: '7px 10px', borderRadius: 7, color: 'var(--code-accent)' }}>
                       GET /v1/databases/collections/{active.id}/documents
                     </code>
-                    <CopyButton text={`/v1/databases/collections/${active.id}/documents`} label="Copy" />
-                    <button className="btn sm ghost" onClick={() => nav('/docs')}>API docs</button>
+                    <CopyButton text={`/v1/databases/collections/${active.id}/documents`} label={t('Copy')} />
+                    <button className="btn sm ghost" onClick={() => nav('/docs')}>{t('API docs')}</button>
                   </div>
                 </div>
               </div>
@@ -371,37 +373,37 @@ export default function Databases() {
 
       {/* create collection */}
       <Modal
-        open={newCol} onClose={() => setNewCol(false)} title="Create collection"
-        subtitle="Collections are typed tables exposed over REST and GraphQL."
+        open={newCol} onClose={() => setNewCol(false)} title={t('Create collection')}
+        subtitle={t('Collections are typed tables exposed over REST and GraphQL.')}
         footer={<>
-          <button className="btn ghost" onClick={() => setNewCol(false)}>Cancel</button>
-          <button className="btn primary" disabled={!colForm.name || saving} onClick={createCollection}>{saving ? 'Creating…' : 'Create'}</button>
+          <button className="btn ghost" onClick={() => setNewCol(false)}>{t('Cancel')}</button>
+          <button className="btn primary" disabled={!colForm.name || saving} onClick={createCollection}>{saving ? t('Creating…') : t('Create')}</button>
         </>}
       >
         <div className="field">
-          <label className="label">Name <span className="req">*</span></label>
-          <input className="input" autoFocus placeholder="e.g. Reviews" value={colForm.name}
+          <label className="label">{t('Name')} <span className="req">*</span></label>
+          <input className="input" autoFocus placeholder={t('e.g. Reviews')} value={colForm.name}
             onChange={(e) => setColForm({ ...colForm, name: e.target.value })} />
         </div>
         <div className="field">
-          <label className="label">Key</label>
-          <input className="input mono" placeholder="auto-generated from name" value={colForm.key}
+          <label className="label">{t('Key')}</label>
+          <input className="input mono" placeholder={t('auto-generated from name')} value={colForm.key}
             onChange={(e) => setColForm({ ...colForm, key: e.target.value })} />
-          <div className="hint">Lowercase identifier used in API calls. Must be unique.</div>
+          <div className="hint">{t('Lowercase identifier used in API calls. Must be unique.')}</div>
         </div>
         <div className="input-row">
           <div className="field">
-            <label className="label">Icon</label>
+            <label className="label">{t('Icon')}</label>
             <select className="select" value={colForm.icon} onChange={(e) => setColForm({ ...colForm, icon: e.target.value })}>
-              <option value="database">Database</option>
-              <option value="package">Package</option>
-              <option value="shopping-bag">Shopping bag</option>
-              <option value="users">Users</option>
-              <option value="file-text">Document</option>
+              <option value="database">{t('Database')}</option>
+              <option value="package">{t('Package')}</option>
+              <option value="shopping-bag">{t('Shopping bag')}</option>
+              <option value="users">{t('Users')}</option>
+              <option value="file-text">{t('Document')}</option>
             </select>
           </div>
           <div className="field">
-            <label className="label">Accent</label>
+            <label className="label">{t('Accent')}</label>
             <input type="color" className="input" style={{ height: 36, padding: 4 }} value={colForm.color}
               onChange={(e) => setColForm({ ...colForm, color: e.target.value })} />
           </div>
@@ -410,9 +412,9 @@ export default function Databases() {
           <input type="checkbox" checked={colForm.documentSecurity}
             onChange={(e) => setColForm({ ...colForm, documentSecurity: e.target.checked })} style={{ marginTop: 2 }} />
           <span>
-            Document-level security
+            {t('Document-level security')}
             <span className="hint" style={{ display: 'block', marginTop: 2 }}>
-              Each document carries its own <code className="mono">read("…")</code> rules. Off by default — the project role decides.
+              {t('Each document carries its own')} <code className="mono">read("…")</code> {t('rules. Off by default — the project role decides.')}
             </span>
           </span>
         </label>
@@ -433,19 +435,19 @@ export default function Databases() {
       {/* document drawer */}
       <Drawer
         open={!!docDrawer} onClose={() => { setDocDrawer(null); setFieldErrors({}); }}
-        title={editing ? 'Edit document' : 'New document'}
+        title={editing ? t('Edit document') : t('New document')}
         subtitle={active ? `${active.name} · ${active.key}` : ''}
         footer={<>
-          <button className="btn ghost" onClick={() => setDocDrawer(null)}>Cancel</button>
+          <button className="btn ghost" onClick={() => setDocDrawer(null)}>{t('Cancel')}</button>
           <button className="btn primary" onClick={saveDoc} disabled={saving}>
-            <Check size={14} /> {saving ? 'Saving…' : editing ? 'Save changes' : 'Create document'}
+            <Check size={14} /> {saving ? t('Saving…') : editing ? t('Save changes') : t('Create document')}
           </button>
         </>}
       >
         <div className="flex" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
-          <div className="tiny dim">{editing ? <span className="mono">{editing.id}</span> : 'Fields marked * are required'}</div>
+          <div className="tiny dim">{editing ? <span className="mono">{editing.id}</span> : t('Fields marked * are required')}</div>
           <div className="flex" style={{ gap: 4 }}>
-            <button className={`btn sm ${jsonMode ? 'ghost' : ''}`} onClick={() => setJsonMode(false)}><Table2 size={12} /> Form</button>
+            <button className={`btn sm ${jsonMode ? 'ghost' : ''}`} onClick={() => setJsonMode(false)}><Table2 size={12} /> {t('Form')}</button>
             <button className={`btn sm ${jsonMode ? '' : 'ghost'}`} onClick={() => { setJsonText(JSON.stringify(docData, null, 2)); setJsonMode(true); }}>
               <FileJson size={12} /> JSON
             </button>
@@ -462,32 +464,32 @@ export default function Databases() {
                   if (fieldErrors[a.key]) setFieldErrors((e) => { const n = { ...e }; delete n[a.key]; return n; });
                 }} />
               {fieldErrors[a.key] && (
-                <div className="tiny" style={{ color: '#ff6b6b', marginTop: 2, marginBottom: 12 }}>
-                  {fieldErrors[a.key]}
+                <div className="tiny" style={{ color: 'var(--red-text)', marginTop: 2, marginBottom: 12 }}>
+                  {t(fieldErrors[a.key])}
                 </div>
               )}
             </div>
           ))
         )}
-        {!active?.attributes?.length && <div className="hint">This collection has no attributes. Use JSON mode to store arbitrary data.</div>}
+        {!active?.attributes?.length && <div className="hint">{t('This collection has no attributes. Use JSON mode to store arbitrary data.')}</div>}
 
         {active?.documentSecurity && (
           <div className="field" style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
-            <label className="label"><Lock size={11} /> Document permissions</label>
+            <label className="label"><Lock size={11} /> {t('Document permissions')}</label>
             <textarea
               className="textarea mono" style={{ minHeight: 92, fontSize: 12 }}
               value={permText} onChange={(e) => setPermText(e.target.value)}
               placeholder={'read("any")\nupdate("users")\ndelete("users")'}
             />
             <div className="hint">
-              One rule per line. Targets: <code className="mono">any</code>, <code className="mono">users</code>,
-              {' '}<code className="mono">user:&lt;id&gt;</code>, <code className="mono">team:&lt;projectId&gt;/&lt;role&gt;</code>.
-              {' '}<code className="mono">write(…)</code> covers update + delete. Read is enforced on list &amp; get.
+              {t('One rule per line. Targets:')} <code className="mono">any</code>, <code className="mono">users</code>,
+              {' '}<code className="mono">user:&lt;id&gt;</code>, <code className="mono">team:&lt;projectId&gt;/&lt;role&gt;</code>{t('.')}
+              {' '}<code className="mono">write(…)</code> {t('covers update + delete. Read is enforced on list & get.')}
             </div>
             <div className="flex" style={{ gap: 6, marginTop: 4 }}>
-              <button className="btn sm ghost" onClick={() => setPermText(DEFAULT_PERMS.join('\n'))}>Use defaults</button>
+              <button className="btn sm ghost" onClick={() => setPermText(DEFAULT_PERMS.join('\n'))}>{t('Use defaults')}</button>
               <button className="btn sm ghost" onClick={() => setPermText(`read("user:${me?.principal?.id || 'usr_x'}")\nupdate("user:${me?.principal?.id || 'usr_x'}")\ndelete("user:${me?.principal?.id || 'usr_x'}")`)}>
-                Only me
+                {t('Only me')}
               </button>
             </div>
           </div>
@@ -495,16 +497,17 @@ export default function Databases() {
       </Drawer>
 
       <Modal
-        open={!!confirm} onClose={() => setConfirm(null)} title="Confirm deletion"
-        subtitle={`This action cannot be undone.`}
+        open={!!confirm} onClose={() => setConfirm(null)} title={t('Confirm deletion')}
+        subtitle={t('This action cannot be undone.')}
         footer={<>
-          <button className="btn ghost" onClick={() => setConfirm(null)}>Cancel</button>
-          <button className="btn danger" onClick={doDelete}>Delete {confirm?.type === 'collection' ? 'collection' : 'document'}</button>
+          <button className="btn ghost" onClick={() => setConfirm(null)}>{t('Cancel')}</button>
+          <button className="btn danger" onClick={doDelete}>{confirm?.type === 'collection' ? t('Delete collection') : t('Delete document')}</button>
         </>}
       >
         <p style={{ margin: 0, fontSize: 13 }}>
-          You are about to delete <b>{confirm?.name}</b>
-          {confirm?.type === 'collection' ? ' and all of its documents.' : '.'}
+          {confirm?.type === 'collection'
+            ? <>{t('You are about to delete')} <b>{confirm?.name}</b> {t('and all of its documents.')}</>
+            : <>{t('You are about to delete')} <b>{confirm?.name}</b>{t('.')}</>}
         </p>
       </Modal>
     </div>
@@ -512,6 +515,7 @@ export default function Databases() {
 }
 
 function DocField({ attr, value, onChange, error }: { attr: Attribute; value: any; onChange: (v: any) => void; error?: string }) {
+  const t = useT();
   const I = TYPE_ICON[attr.type] || Type;
   if (attr.type === 'boolean') {
     return (
@@ -528,7 +532,7 @@ function DocField({ attr, value, onChange, error }: { attr: Attribute; value: an
       <div className="field">
         <label className="label"><I size={11} /> {attr.key}{attr.required && <span className="req">*</span>}</label>
         <select className="select" value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
-          <option value="">— select —</option>
+          <option value="">{t('— select —')}</option>
           {attr.elements?.map((el) => <option key={el} value={el}>{el}</option>)}
         </select>
       </div>
@@ -560,6 +564,7 @@ function AttributeModal({ open, onClose, collection, onChanged }: {
   open: boolean; onClose: () => void; collection: Collection | null; onChanged: () => Promise<void>;
 }) {
   const toast = useToast();
+  const t = useT();
   const [form, setForm] = useState({ key: '', type: 'string', required: false, elements: '' });
   const [busy, setBusy] = useState(false);
 
@@ -571,7 +576,7 @@ function AttributeModal({ open, onClose, collection, onChanged }: {
         key: form.key, type: form.type, required: form.required,
         elements: form.type === 'enum' ? form.elements.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
       });
-      toast.push('Attribute added');
+      toast.push(t('Attribute added'));
       setForm({ key: '', type: 'string', required: false, elements: '' });
       await onChanged();
     } catch (e: any) { toast.push(e.message, 'err'); }
@@ -579,61 +584,61 @@ function AttributeModal({ open, onClose, collection, onChanged }: {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Attributes"
-      subtitle={collection ? `${collection.name} schema` : ''} wide
+    <Modal open={open} onClose={onClose} title={t('Attributes')}
+      subtitle={collection ? t('{name} schema', { name: collection.name }) : ''} wide
     >
       <div className="stack">
-        <div className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+        <div className="card" style={{ background: 'var(--w1)' }}>
           <div className="card-body tight">
             <table className="table">
-              <thead><tr><th>Key</th><th>Type</th><th>Required</th><th>Enum values</th><th /></tr></thead>
+              <thead><tr><th>{t('Key')}</th><th>{t('Type')}</th><th>{t('Required')}</th><th>{t('Enum values')}</th><th /></tr></thead>
               <tbody>
                 {collection?.attributes?.map((a) => (
                   <tr key={a.id}>
-                    <td className="mono" style={{ color: '#c4b5fd' }}>{a.key}</td>
+                    <td className="mono" style={{ color: 'var(--violet-text)' }}>{a.key}</td>
                     <td><Badge>{a.type}</Badge></td>
-                    <td className="dim">{a.required ? 'yes' : 'no'}</td>
+                    <td className="dim">{a.required ? t('yes') : t('no')}</td>
                     <td className="dim tiny">{a.elements?.join(', ') || '—'}</td>
                     <td className="right">
                       <button className="mini-btn danger" onClick={async () => {
-                        try { await api.deleteAttribute(collection.id, a.id); toast.push('Attribute removed'); await onChanged(); }
+                        try { await api.deleteAttribute(collection.id, a.id); toast.push(t('Attribute removed')); await onChanged(); }
                         catch (e: any) { toast.push(e.message, 'err'); }
                       }}><Trash2 size={12} /></button>
                     </td>
                   </tr>
                 ))}
-                {!collection?.attributes?.length && <tr><td colSpan={5} className="dim" style={{ textAlign: 'center', padding: 20 }}>No attributes yet</td></tr>}
+                {!collection?.attributes?.length && <tr><td colSpan={5} className="dim" style={{ textAlign: 'center', padding: 20 }}>{t('No attributes yet')}</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
         <div className="divider" />
-        <div className="section-title">Add attribute</div>
+        <div className="section-title">{t('Add attribute')}</div>
         <div className="input-row">
           <div className="field">
-            <label className="label">Key</label>
-            <input className="input mono" placeholder="e.g. rating" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
+            <label className="label">{t('Key')}</label>
+            <input className="input mono" placeholder={t('e.g. rating')} value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
           </div>
           <div className="field">
-            <label className="label">Type</label>
+            <label className="label">{t('Type')}</label>
             <select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              {['string', 'text', 'integer', 'float', 'boolean', 'email', 'url', 'datetime', 'enum'].map((t) => <option key={t}>{t}</option>)}
+              {['string', 'text', 'integer', 'float', 'boolean', 'email', 'url', 'datetime', 'enum'].map((ty) => <option key={ty}>{ty}</option>)}
             </select>
           </div>
         </div>
         {form.type === 'enum' && (
           <div className="field">
-            <label className="label">Allowed values</label>
-            <input className="input" placeholder="draft, published, archived" value={form.elements} onChange={(e) => setForm({ ...form, elements: e.target.value })} />
+            <label className="label">{t('Allowed values')}</label>
+            <input className="input" placeholder={t('draft, published, archived')} value={form.elements} onChange={(e) => setForm({ ...form, elements: e.target.value })} />
           </div>
         )}
         <label className="flex pointer tiny" style={{ gap: 7 }}>
           <input type="checkbox" checked={form.required} onChange={(e) => setForm({ ...form, required: e.target.checked })} />
-          Required attribute
+          {t('Required attribute')}
         </label>
         <div className="flex">
-          <button className="btn primary" disabled={!form.key || busy} onClick={add}><Plus size={14} /> Add attribute</button>
-          <button className="btn ghost" onClick={onClose} style={{ marginLeft: 'auto' }}>Done</button>
+          <button className="btn primary" disabled={!form.key || busy} onClick={add}><Plus size={14} /> {t('Add attribute')}</button>
+          <button className="btn ghost" onClick={onClose} style={{ marginLeft: 'auto' }}>{t('Done')}</button>
         </div>
       </div>
     </Modal>

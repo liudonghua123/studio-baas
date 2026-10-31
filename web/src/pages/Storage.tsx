@@ -8,9 +8,11 @@ import type { Bucket, FileItem } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtBytes, fmtDateTime, timeAgo } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import { useT } from '../lib/locale';
 
 export default function Storage() {
   const toast = useToast();
+  const t = useT();
   const { can } = useAuth();
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [active, setActive] = useState<Bucket | null>(null);
@@ -44,8 +46,8 @@ export default function Storage() {
     for (const f of Array.from(list)) {
       try {
         await api.upload(active.id, f);
-        toast.push(`${f.name} uploaded`);
-      } catch (e: any) { toast.push(`${f.name}: ${e.message}`, 'err'); }
+        toast.push(t('{name} uploaded', { name: f.name }));
+      } catch (e: any) { toast.push(t('{name}: {message}', { name: f.name, message: e.message }), 'err'); }
     }
     await loadFiles(active);
     await load();
@@ -60,7 +62,7 @@ export default function Storage() {
         allowedExtensions: form.allowedExtensions.split(',').map((s) => s.trim()).filter(Boolean),
         encryption: form.encryption, imageTransform: form.imageTransform, compression: 'gzip',
       });
-      toast.push('Bucket created');
+      toast.push(t('Bucket created'));
       setNewBucket(false);
       setForm({ name: '', maxFileSize: 5, allowedExtensions: 'png,jpg,svg,webp', encryption: true, imageTransform: true });
       await load();
@@ -73,15 +75,15 @@ export default function Storage() {
     <div className="page">
       <div className="page-head">
         <div>
-          <div className="eyebrow"><FolderOpen size={11} /> Storage</div>
-          <h1>Buckets & files</h1>
-          <p>Object storage with per-bucket limits, extensions and access policy. 加密/压缩仅作策略记录，文件实际以明文存放在本地磁盘。</p>
+          <div className="eyebrow"><FolderOpen size={11} /> {t('Storage')}</div>
+          <h1>{t('Buckets & files')}</h1>
+          <p>{t('Object storage with per-bucket limits, extensions and access policy. Encryption and compression are policy records only — files are stored as plaintext on the local disk.')}</p>
         </div>
         <div className="page-actions">
-          <button className="btn ghost" onClick={() => { load(); loadFiles(active); }}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn ghost" disabled={!can('storage.write')} onClick={() => setNewBucket(true)}><Plus size={14} /> New bucket</button>
+          <button className="btn ghost" onClick={() => { load(); loadFiles(active); }}><RefreshCw size={14} /> {t('Refresh')}</button>
+          <button className="btn ghost" disabled={!can('storage.write')} onClick={() => setNewBucket(true)}><Plus size={14} /> {t('New bucket')}</button>
           <button className="btn primary" disabled={!active || busy} onClick={() => inputRef.current?.click()}>
-            <UploadCloud size={14} /> {busy ? 'Uploading…' : 'Upload file'}
+            <UploadCloud size={14} /> {busy ? t('Uploading…') : t('Upload file')}
           </button>
           <input ref={inputRef} type="file" multiple hidden onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
         </div>
@@ -93,7 +95,7 @@ export default function Storage() {
             {buckets.map((b) => (
               <div key={b.id} className={`bucket-chip pointer ${active?.id === b.id ? 'active' : ''}`} onClick={() => setActive(b)}>
                 <FolderOpen size={13} /> {b.name}
-                <small>{b.fileCount} files · {fmtBytes(b.totalSize)}</small>
+                <small>{t('{n} files · {size}', { n: b.fileCount, size: fmtBytes(b.totalSize) })}</small>
               </div>
             ))}
           </div>
@@ -101,24 +103,24 @@ export default function Storage() {
           {active && (
             <div className="grid-stats" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))' }}>
               <div className="stat">
-                <div className="stat-label"><HardDrive size={12} /> Bucket size</div>
+                <div className="stat-label"><HardDrive size={12} /> {t('Bucket size')}</div>
                 <div className="stat-value" style={{ fontSize: 21 }}>{fmtBytes(active.totalSize)}</div>
-                <div className="stat-foot">of {fmtBytes(active.maxFileSize)} per-file limit</div>
+                <div className="stat-foot">{t('of {size} per-file limit', { size: fmtBytes(active.maxFileSize) })}</div>
               </div>
               <div className="stat">
-                <div className="stat-label"><ImageIcon size={12} /> Files</div>
+                <div className="stat-label"><ImageIcon size={12} /> {t('Files')}</div>
                 <div className="stat-value" style={{ fontSize: 21 }}>{active.fileCount}</div>
-                <div className="stat-foot">{active.allowedExtensions.map((e) => `.${e}`).join(' ') || 'any type'}</div>
+                <div className="stat-foot">{active.allowedExtensions.map((e) => `.${e}`).join(' ') || t('any type')}</div>
               </div>
               <div className="stat">
-                <div className="stat-label"><Lock size={12} /> Encryption</div>
-                <div className="stat-value" style={{ fontSize: 21 }}>{active.encryption ? 'AES-256' : 'Off'}</div>
-                <div className="stat-foot">policy only · stored as plain files</div>
+                <div className="stat-label"><Lock size={12} /> {t('Encryption')}</div>
+                <div className="stat-value" style={{ fontSize: 21 }}>{active.encryption ? 'AES-256' : t('Off')}</div>
+                <div className="stat-foot">{t('policy only · stored as plain files')}</div>
               </div>
               <div className="stat">
-                <div className="stat-label"><Wand2 size={12} /> Compression</div>
+                <div className="stat-label"><Wand2 size={12} /> {t('Compression')}</div>
                 <div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize' }}>{active.compression}</div>
-                <div className="stat-foot">{active.imageTransform ? 'policy only · no server-side transform' : 'transforms disabled'}</div>
+                <div className="stat-foot">{active.imageTransform ? t('policy only · no server-side transform') : t('transforms disabled')}</div>
               </div>
             </div>
           )}
@@ -132,16 +134,16 @@ export default function Storage() {
           >
             <div className="card-head">
               <div>
-                <div className="card-title">{active?.name || 'Files'}</div>
-                <div className="card-sub">{active ? `bucket_${active.id}` : 'Select a bucket'}</div>
+                <div className="card-title">{active?.name || t('Files')}</div>
+                <div className="card-sub">{active ? `bucket_${active.id}` : t('Select a bucket')}</div>
               </div>
               <div className="flex" style={{ marginLeft: 'auto', gap: 6 }}>
-                {active?.encryption && <Badge tone="green"><ShieldCheck size={10} /> encrypted</Badge>}
+                {active?.encryption && <Badge tone="green"><ShieldCheck size={10} /> {t('encrypted')}</Badge>}
                 {active && (
                   <button className="btn sm danger" onClick={async () => {
-                    if (!confirm(`Delete bucket "${active.name}" and all its files?`)) return;
-                    await api.deleteBucket(active.id); toast.push('Bucket deleted'); setActive(null); load();
-                  }}><Trash2 size={12} /> Delete bucket</button>
+                    if (!confirm(t('Delete bucket “{name}” and all its files?', { name: active.name }))) return;
+                    await api.deleteBucket(active.id); toast.push(t('Bucket deleted')); setActive(null); load();
+                  }}><Trash2 size={12} /> {t('Delete bucket')}</button>
                 )}
               </div>
             </div>
@@ -149,8 +151,8 @@ export default function Storage() {
               {files.length === 0 ? (
                 <div className="dropzone" style={{ minHeight: 220 }} onClick={() => inputRef.current?.click()}>
                   <UploadCloud size={22} />
-                  <b style={{ color: 'var(--muted)', fontWeight: 550 }}>Drop files to upload</b>
-                  <span>or click to browse · max {active ? fmtBytes(active.maxFileSize) : '—'}</span>
+                  <b style={{ color: 'var(--muted)', fontWeight: 550 }}>{t('Drop files to upload')}</b>
+                  <span>{t('or click to browse · max {size}', { size: active ? fmtBytes(active.maxFileSize) : '—' })}</span>
                 </div>
               ) : (
                 <div className="file-grid">
@@ -164,17 +166,17 @@ export default function Storage() {
                         <small>{fmtBytes(f.size)} · {timeAgo(f.createdAt)}</small>
                       </div>
                       <div className="file-actions">
-                        <button className="mini-btn" onClick={() => setPreview(f)} title="Preview"><Eye size={12} /></button>
+                        <button className="mini-btn" onClick={() => setPreview(f)} title={t('Preview')}><Eye size={12} /></button>
                         <button className="mini-btn danger" onClick={async () => {
-                          await api.deleteFile(f.id); toast.push('File deleted'); loadFiles(active); load();
-                        }} title="Delete"><Trash2 size={12} /></button>
+                          await api.deleteFile(f.id); toast.push(t('File deleted')); loadFiles(active); load();
+                        }} title={t('Delete')}><Trash2 size={12} /></button>
                       </div>
                     </div>
                   ))}
                   <div className="file-card" style={{ background: 'transparent' }}>
                     <div className="dropzone" style={{ height: '100%' }} onClick={() => inputRef.current?.click()}>
                       <Plus size={18} />
-                      <span>Add file</span>
+                      <span>{t('Add file')}</span>
                     </div>
                   </div>
                 </div>
@@ -184,49 +186,49 @@ export default function Storage() {
         </>
       )}
 
-      <Modal open={newBucket} onClose={() => setNewBucket(false)} title="Create bucket"
-        subtitle="Buckets isolate files and define their own permissions."
+      <Modal open={newBucket} onClose={() => setNewBucket(false)} title={t('Create bucket')}
+        subtitle={t('Buckets isolate files and define their own permissions.')}
         footer={<>
-          <button className="btn ghost" onClick={() => setNewBucket(false)}>Cancel</button>
-          <button className="btn primary" disabled={!form.name} onClick={createBucket}>Create bucket</button>
+          <button className="btn ghost" onClick={() => setNewBucket(false)}>{t('Cancel')}</button>
+          <button className="btn primary" disabled={!form.name} onClick={createBucket}>{t('Create bucket')}</button>
         </>}
       >
         <div className="field">
-          <label className="label">Name <span className="req">*</span></label>
-          <input className="input" autoFocus placeholder="e.g. avatars" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <label className="label">{t('Name')} <span className="req">*</span></label>
+          <input className="input" autoFocus placeholder={t('e.g. avatars')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
         <div className="input-row">
           <div className="field">
-            <label className="label">Max file size (MB)</label>
+            <label className="label">{t('Max file size (MB)')}</label>
             <input className="input" type="number" value={form.maxFileSize} onChange={(e) => setForm({ ...form, maxFileSize: Number(e.target.value) })} />
           </div>
           <div className="field">
-            <label className="label">Allowed extensions</label>
+            <label className="label">{t('Allowed extensions')}</label>
             <input className="input" value={form.allowedExtensions} onChange={(e) => setForm({ ...form, allowedExtensions: e.target.value })} />
           </div>
         </div>
         <label className="flex pointer tiny" style={{ gap: 7, marginBottom: 8 }}>
-          <input type="checkbox" checked={form.encryption} onChange={(e) => setForm({ ...form, encryption: e.target.checked })} /> Encrypt files at rest (AES-256)
+          <input type="checkbox" checked={form.encryption} onChange={(e) => setForm({ ...form, encryption: e.target.checked })} /> {t('Encrypt files at rest (AES-256)')}
         </label>
         <label className="flex pointer tiny" style={{ gap: 7 }}>
-          <input type="checkbox" checked={form.imageTransform} onChange={(e) => setForm({ ...form, imageTransform: e.target.checked })} /> Enable image transformations
+          <input type="checkbox" checked={form.imageTransform} onChange={(e) => setForm({ ...form, imageTransform: e.target.checked })} /> {t('Enable image transformations')}
         </label>
       </Modal>
 
       <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.name || ''} subtitle={preview ? `${preview.mimeType} · ${fmtBytes(preview.size)}` : ''} wide
-        footer={<button className="btn ghost" onClick={() => setPreview(null)}><X size={14} /> Close</button>}
+        footer={<button className="btn ghost" onClick={() => setPreview(null)}><X size={14} /> {t('Close')}</button>}
       >
         {preview && (
           <div>
             {isImage(preview) ? (
-              <img src={preview.url} alt={preview.name} style={{ width: '100%', borderRadius: 10, background: '#08080c' }} />
+              <img src={preview.url} alt={preview.name} style={{ width: '100%', borderRadius: 10, background: 'var(--code-bg)' }} />
             ) : (
-              <div className="empty"><FileText size={26} /><h4>Preview unavailable</h4><p>Download the file to inspect it.</p></div>
+              <div className="empty"><FileText size={26} /><h4>{t('Preview unavailable')}</h4><p>{t('Download the file to inspect it.')}</p></div>
             )}
             <dl className="kv" style={{ marginTop: 16 }}>
-              <dt>File ID</dt><dd className="mono">{preview.id}</dd>
-              <dt>Uploaded</dt><dd>{fmtDateTime(preview.createdAt)}</dd>
-              <dt>URL</dt><dd><a href={preview.url} target="_blank" rel="noreferrer" style={{ color: '#ff8aa6' }}>{preview.url}</a></dd>
+              <dt>{t('File ID')}</dt><dd className="mono">{preview.id}</dd>
+              <dt>{t('Uploaded')}</dt><dd>{fmtDateTime(preview.createdAt)}</dd>
+              <dt>URL</dt><dd><a href={preview.url} target="_blank" rel="noreferrer" style={{ color: 'var(--pink-text)' }}>{preview.url}</a></dd>
             </dl>
           </div>
         )}

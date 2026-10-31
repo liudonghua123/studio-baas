@@ -6,8 +6,10 @@ import type { Site } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import { useT } from '../lib/locale';
 
 export default function Sites() {
+  const t = useT();
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -28,7 +30,7 @@ export default function Sites() {
     setBusy(true);
     try {
       const s = await api.createSite({ name: form.name, framework: form.framework });
-      toast.push('Site created');
+      toast.push(t('Site created'));
       nav(`/sites/${s.id}`);
     } catch (e: any) { toast.push(e.message, 'err'); }
     setBusy(false);
@@ -38,23 +40,23 @@ export default function Sites() {
     <div className="page">
       <div className="page-head">
         <div>
-          <div className="eyebrow"><Globe2 size={11} /> Sites</div>
-          <h1>Hosting</h1>
-          <p>Edit HTML, CSS and JS in the browser, preview the result live, then deploy to your domain.</p>
+          <div className="eyebrow"><Globe2 size={11} /> {t('Sites')}</div>
+          <h1>{t('Hosting')}</h1>
+          <p>{t('Edit HTML, CSS and JS in the browser, preview the result live, then deploy to your domain.')}</p>
         </div>
         <div className="page-actions">
-          <button className="btn ghost" onClick={load}><RefreshCw size={14} /> Refresh</button>
-          <button className="btn primary" disabled={!can('sites.write')} onClick={() => setOpen(true)}><Plus size={14} /> Create site</button>
+          <button className="btn ghost" onClick={load}><RefreshCw size={14} /> {t('Refresh')}</button>
+          <button className="btn primary" disabled={!can('sites.write')} onClick={() => setOpen(true)}><Plus size={14} /> {t('Create site')}</button>
         </div>
       </div>
 
       {loading ? <div className="card"><Loading /></div> : sites.length === 0 ? (
-        <div className="card"><Empty title="No sites yet" hint="Create a site to start editing and previewing pages." icon={<Globe2 size={26} />} /></div>
+        <div className="card"><Empty title={t('No sites yet')} hint={t('Create a site to start editing and previewing pages.')} icon={<Globe2 size={26} />} /></div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
           {sites.map((s) => (
             <div key={s.id} className="card" style={{ overflow: 'hidden', cursor: 'pointer' }} onClick={() => nav(`/sites/${s.id}`)}>
-              <div style={{ height: 178, background: '#08080c', borderBottom: '1px solid var(--line)', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ height: 178, background: 'var(--code-bg)', borderBottom: '1px solid var(--line)', position: 'relative', overflow: 'hidden' }}>
                 <iframe
                   src={`/v1/sites/${s.id}/preview/index.html`}
                   title={s.name}
@@ -77,7 +79,7 @@ export default function Sites() {
                   <span className="mono">{s.domain}</span>
                 </div>
                 <div className="flex" style={{ gap: 12, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)', fontSize: 10.5, color: 'var(--dim)' }}>
-                  <span className="flex" style={{ gap: 4 }}><Code2 size={10} /> {s.files.length} files</span>
+                  <span className="flex" style={{ gap: 4 }}><Code2 size={10} /> {t('{n} files', { n: s.files.length })}</span>
                   <span className="flex" style={{ gap: 4 }}><GitBranch size={10} /> {s.framework}</span>
                   <span style={{ marginLeft: 'auto' }}>{timeAgo(s.updatedAt)}</span>
                 </div>
@@ -87,25 +89,25 @@ export default function Sites() {
         </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Create site"
-        subtitle="A starter index.html is generated for you."
+      <Modal open={open} onClose={() => setOpen(false)} title={t('Create site')}
+        subtitle={t('A starter index.html is generated for you.')}
         footer={<>
-          <button className="btn ghost" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn primary" disabled={!form.name || busy} onClick={create}>{busy ? 'Creating…' : 'Create site'}</button>
+          <button className="btn ghost" onClick={() => setOpen(false)}>{t('Cancel')}</button>
+          <button className="btn primary" disabled={!form.name || busy} onClick={create}>{busy ? t('Creating…') : t('Create site')}</button>
         </>}
       >
         <div className="field">
-          <label className="label">Site name <span className="req">*</span></label>
-          <input className="input" autoFocus placeholder="e.g. marketing-site" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <div className="hint">A domain like <span className="mono">{form.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'my-site'}.studio.app</span> is assigned automatically.</div>
+          <label className="label">{t('Site name')} <span className="req">*</span></label>
+          <input className="input" autoFocus placeholder={t('e.g. marketing-site')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <div className="hint">{t('A domain like')} <span className="mono">{form.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'my-site'}.studio.app</span> {t('is assigned automatically.')}</div>
         </div>
         <div className="field">
-          <label className="label">Framework</label>
+          <label className="label">{t('Framework')}</label>
           <select className="select" value={form.framework} onChange={(e) => setForm({ ...form, framework: e.target.value })}>
-            <option value="static">Static HTML</option>
-            <option value="react">React SPA</option>
-            <option value="next">Next.js</option>
-            <option value="astro">Astro</option>
+            <option value="static">{t('Static HTML')}</option>
+            <option value="react">{t('React SPA')}</option>
+            <option value="next">{t('Next.js')}</option>
+            <option value="astro">{t('Astro')}</option>
           </select>
         </div>
       </Modal>

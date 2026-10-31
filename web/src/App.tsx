@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/ui';
 import { AuthProvider } from './lib/auth';
+import { LocaleProvider } from './lib/locale';
+import { ThemeProvider } from './lib/theme';
 import Overview from './pages/Overview';
 import Databases from './pages/Databases';
 import Storage from './pages/Storage';
@@ -21,6 +23,8 @@ import Members from './pages/Members';
 export default function App() {
   return (
     <BrowserRouter>
+      <ThemeProvider>
+      <LocaleProvider>
       <ToastProvider>
         <AuthProvider>
         <Layout>
@@ -46,6 +50,8 @@ export default function App() {
         </Layout>
         </AuthProvider>
       </ToastProvider>
+      </LocaleProvider>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

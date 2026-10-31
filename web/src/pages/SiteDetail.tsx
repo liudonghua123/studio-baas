@@ -10,10 +10,12 @@ import CodeEditor from '../components/CodeEditor';
 import { Badge, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import { useT } from '../lib/locale';
 
 const langOf = (p: string) => (p.endsWith('.html') ? 'html' : p.endsWith('.css') ? 'css' : p.endsWith('.json') ? 'json' : 'javascript');
 
 export default function SiteDetail() {
+  const t = useT();
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
@@ -51,7 +53,7 @@ export default function SiteDetail() {
       setSite(s);
       setDirty(false);
       setPreviewKey(Date.now());
-      if (!silent) toast.push('Saved & preview refreshed');
+      if (!silent) toast.push(t('Saved & preview refreshed'));
     } catch (e: any) { toast.push(e.message, 'err'); }
     setSaving(false);
   };
@@ -72,7 +74,7 @@ export default function SiteDetail() {
   const addFile = () => {
     if (!newPath.trim()) return;
     const p = newPath.trim().replace(/^\/+/, '');
-    if (files.some((f) => f.path === p)) { toast.push('File already exists', 'err'); return; }
+    if (files.some((f) => f.path === p)) { toast.push(t('File already exists'), 'err'); return; }
     const next = [...files, { path: p, content: '' }];
     setFiles(next);
     setCurrent(p);
@@ -82,7 +84,7 @@ export default function SiteDetail() {
   };
 
   const removeFile = (p: string) => {
-    if (p === site?.entrypoint) { toast.push('Cannot delete the entrypoint file', 'err'); return; }
+    if (p === site?.entrypoint) { toast.push(t('Cannot delete the entrypoint file'), 'err'); return; }
     const next = files.filter((f) => f.path !== p);
     setFiles(next);
     if (current === p) setCurrent(site?.entrypoint || next[0]?.path || 'index.html');
@@ -96,7 +98,7 @@ export default function SiteDetail() {
       const s = await api.deploySite(site.id);
       setSite(s);
       setLogsOpen(true);
-      toast.push('Deployment live');
+      toast.push(t('Deployment live'));
     } catch (e: any) { toast.push(e.message, 'err'); }
   };
 
@@ -107,12 +109,12 @@ export default function SiteDetail() {
   return (
     <div className="page" style={{ maxWidth: 1600 }}>
       <button className="back-btn" onClick={() => nav('/sites')} style={{ marginBottom: 12 }}>
-        <ArrowLeft size={13} /> All sites
+        <ArrowLeft size={13} /> {t('All sites')}
       </button>
 
       <div className="detail-head" style={{ marginBottom: 14 }}>
         <div className="fn-title">
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(139,92,246,.14)', display: 'grid', placeItems: 'center', color: '#c4b5fd' }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(139,92,246,.14)', display: 'grid', placeItems: 'center', color: 'var(--violet-text)' }}>
             <Globe2 size={17} />
           </div>
           <div>
@@ -124,18 +126,18 @@ export default function SiteDetail() {
             </div>
           </div>
           <Badge tone={statusTone(site.status)} dot>{site.status}</Badge>
-          {dirty && <Badge tone="amber">saving…</Badge>}
+          {dirty && <Badge tone="amber">{t('saving…')}</Badge>}
         </div>
         <div className="page-actions">
           <div className="flex" style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 2 }}>
-            <button className="mini-btn" style={{ background: device === 'desktop' ? 'rgba(255,255,255,.07)' : undefined }} onClick={() => setDevice('desktop')} title="Desktop"><Monitor size={13} /></button>
-            <button className="mini-btn" style={{ background: device === 'tablet' ? 'rgba(255,255,255,.07)' : undefined }} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={13} /></button>
-            <button className="mini-btn" style={{ background: device === 'mobile' ? 'rgba(255,255,255,.07)' : undefined }} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={13} /></button>
+            <button className="mini-btn" style={{ background: device === 'desktop' ? 'var(--w4)' : undefined }} onClick={() => setDevice('desktop')} title={t('Desktop')}><Monitor size={13} /></button>
+            <button className="mini-btn" style={{ background: device === 'tablet' ? 'var(--w4)' : undefined }} onClick={() => setDevice('tablet')} title={t('Tablet')}><Tablet size={13} /></button>
+            <button className="mini-btn" style={{ background: device === 'mobile' ? 'var(--w4)' : undefined }} onClick={() => setDevice('mobile')} title={t('Mobile')}><Smartphone size={13} /></button>
           </div>
           <button className="btn ghost" onClick={saveNow} disabled={saving || !can('sites.write')}>
-            {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {saving ? 'Saving' : 'Save'}
+            {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {saving ? t('Saving') : t('Save')}
           </button>
-          <button className="btn primary" disabled={!can('sites.deploy')} onClick={deploy}><Rocket size={14} /> Deploy</button>
+          <button className="btn primary" disabled={!can('sites.deploy')} onClick={deploy}><Rocket size={14} /> {t('Deploy')}</button>
         </div>
       </div>
 
@@ -143,7 +145,7 @@ export default function SiteDetail() {
         <div className="stack" style={{ minHeight: 0 }}>
           <div className="file-tree" style={{ flex: 1 }}>
             <div className="flex" style={{ justifyContent: 'space-between' }}>
-              <div className="tree-label">Files</div>
+              <div className="tree-label">{t('Files')}</div>
               <button className="mini-btn" onClick={() => setAdding(true)}><FilePlus2 size={12} /></button>
             </div>
             {files.map((f) => (
@@ -158,30 +160,30 @@ export default function SiteDetail() {
                 )}
               </div>
             ))}
-            <div className="tree-label" style={{ marginTop: 12 }}>Build logs</div>
+            <div className="tree-label" style={{ marginTop: 12 }}>{t('Build logs')}</div>
             <div
               className="file-item" onClick={() => setLogsOpen(!logsOpen)}
               style={{ justifyContent: 'space-between' }}
             >
-              <span className="flex" style={{ gap: 7 }}><Terminal size={12} /> latest build</span>
+              <span className="flex" style={{ gap: 7 }}><Terminal size={12} /> {t('latest build')}</span>
               {logsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </div>
             {logsOpen && (
               <div className="console" style={{ maxHeight: 180, marginTop: 4, padding: 8 }}>
                 {site.buildLogs.map((l, i) => (
-                  <div key={i} className="log-line" style={{ fontSize: 9.5, color: l.includes('✓') ? '#6ee7b7' : undefined }}>{l}</div>
+                  <div key={i} className="log-line" style={{ fontSize: 9.5, color: l.includes('✓') ? 'var(--green-text)' : undefined }}>{l}</div>
                 ))}
               </div>
             )}
           </div>
           <div className="card" style={{ padding: 12 }}>
-            <div className="tiny dim" style={{ marginBottom: 6 }}>Live sync</div>
+            <div className="tiny dim" style={{ marginBottom: 6 }}>{t('Live sync')}</div>
             <div className="flex" style={{ gap: 6, fontSize: 10.5, color: 'var(--muted)' }}>
               {saving ? <Loader2 size={11} className="spin" /> : <span className="status-dot" />}
-              {saving ? 'Saving to edge…' : `Preview updated ${timeAgo(new Date(previewKey).toISOString())}`}
+              {saving ? t('Saving to edge…') : t('Preview updated {time}', { time: timeAgo(new Date(previewKey).toISOString()) })}
             </div>
             <div className="tiny dim" style={{ marginTop: 8, lineHeight: 1.5 }}>
-              Edits auto-save after 0.9s and hot-reload the iframe.
+              {t('Edits auto-save after 0.9s and hot-reload the iframe.')}
             </div>
           </div>
         </div>
@@ -191,7 +193,7 @@ export default function SiteDetail() {
             <FileCode2 size={12} />
             <span className="file">{activeFile?.path}</span>
             {dirty && <span className="dirty-dot" />}
-            <span style={{ marginLeft: 'auto' }}>{activeFile?.content.split('\n').length || 0} lines</span>
+            <span style={{ marginLeft: 'auto' }}>{t('{n} lines', { n: activeFile?.content.split('\n').length || 0 })}</span>
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <CodeEditor
@@ -206,36 +208,36 @@ export default function SiteDetail() {
         <div className="preview-pane" style={{ minHeight: 0 }}>
           <div className="preview-bar">
             <div className="preview-url">https://{site.domain}/{site.entrypoint}</div>
-            <button className="mini-btn" onClick={() => setPreviewKey(Date.now())} title="Reload preview"><RefreshCw size={12} /></button>
-            <a className="mini-btn" href={`/v1/sites/${site.id}/preview/${site.entrypoint}`} target="_blank" rel="noreferrer" title="Open in new tab"><ExternalLink size={12} /></a>
+            <button className="mini-btn" onClick={() => setPreviewKey(Date.now())} title={t('Reload preview')}><RefreshCw size={12} /></button>
+            <a className="mini-btn" href={`/v1/sites/${site.id}/preview/${site.entrypoint}`} target="_blank" rel="noreferrer" title={t('Open in new tab')}><ExternalLink size={12} /></a>
           </div>
-          <div style={{ flex: 1, display: 'flex', justifyContent: 'center', background: '#06060a', minHeight: 0, padding: device === 'desktop' ? 0 : 10 }}>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'center', background: 'var(--code-bg-3)', minHeight: 0, padding: device === 'desktop' ? 0 : 10 }}>
             <iframe
               key={previewKey}
               src={`/v1/sites/${site.id}/preview/${site.entrypoint}?t=${previewKey}`}
-              title="preview"
+              title={t('preview')}
               style={{ width, height: '100%', border: 0, background: '#fff', borderRadius: device === 'desktop' ? 0 : 10, transition: 'width .25s ease' }}
             />
           </div>
           <div className="preview-bar" style={{ borderTop: '1px solid var(--line)', borderBottom: 0, justifyContent: 'space-between' }}>
-            <span className="preview-status"><span className="status-dot" /> Live preview</span>
-            <span className="preview-status">auto-saved · {files.length} files</span>
+            <span className="preview-status"><span className="status-dot" /> {t('Live preview')}</span>
+            <span className="preview-status">{t('auto-saved · {n} files', { n: files.length })}</span>
           </div>
         </div>
       </div>
 
-      <Modal open={adding} onClose={() => setAdding(false)} title="New file"
-        subtitle="Add HTML, CSS, JS or any static asset path."
+      <Modal open={adding} onClose={() => setAdding(false)} title={t('New file')}
+        subtitle={t('Add HTML, CSS, JS or any static asset path.')}
         footer={<>
-          <button className="btn ghost" onClick={() => setAdding(false)}>Cancel</button>
-          <button className="btn primary" disabled={!newPath} onClick={addFile}><Plus size={14} /> Create file</button>
+          <button className="btn ghost" onClick={() => setAdding(false)}>{t('Cancel')}</button>
+          <button className="btn primary" disabled={!newPath} onClick={addFile}><Plus size={14} /> {t('Create file')}</button>
         </>}
       >
         <div className="field">
-          <label className="label">File path</label>
+          <label className="label">{t('File path')}</label>
           <input className="input mono" autoFocus placeholder="about.html" value={newPath} onChange={(e) => setNewPath(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addFile()} />
-          <div className="hint">Relative to the site root, e.g. <span className="mono">assets/app.js</span></div>
+          <div className="hint">{t('Relative to the site root, e.g.')} <span className="mono">assets/app.js</span></div>
         </div>
       </Modal>
     </div>

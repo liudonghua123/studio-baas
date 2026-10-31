@@ -1,3 +1,5 @@
+import { currentLang, localeOf, tGlobal } from './i18n';
+
 export const fmtBytes = (n: number) => {
   if (!n) return '0 B';
   const u = ['B', 'KB', 'MB', 'GB'];
@@ -6,25 +8,25 @@ export const fmtBytes = (n: number) => {
 };
 
 export const fmtNum = (n: number) =>
-  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : n.toLocaleString('en-US');
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : n.toLocaleString(localeOf(currentLang()));
 
 export const fmtDate = (iso?: string | null) => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString(localeOf(currentLang()), { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 export const fmtDateTime = (iso?: string | null) => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleString(localeOf(currentLang()), { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
 /** Format an instant in a specific IANA timezone, e.g. "01 Nov, 09:00" */
 export const fmtInZone = (iso: string | null | undefined, timeZone: string) => {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('en-GB', {
+    return new Date(iso).toLocaleString(localeOf(currentLang()), {
       timeZone, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
     });
   } catch {
@@ -37,30 +39,30 @@ export const zoneLabel = (timeZone: string) =>
   timeZone === 'UTC' ? 'UTC' : timeZone.split('/').pop()!.replace(/_/g, ' ');
 
 export const timeAgo = (iso?: string | null) => {
-  if (!iso) return 'never';
+  if (!iso) return tGlobal('never');
   const diff = Date.now() - new Date(iso).getTime();
   const s = Math.floor(diff / 1000);
-  if (s < 45) return 'just now';
+  if (s < 45) return tGlobal('just now');
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return tGlobal('{m}m ago', { m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
+  if (h < 24) return tGlobal('{h}h ago', { h });
   const d = Math.floor(h / 24);
-  if (d < 30) return `${d}d ago`;
-  return `${Math.floor(d / 30)}mo ago`;
+  if (d < 30) return tGlobal('{d}d ago', { d });
+  return tGlobal('{d}mo ago', { d: Math.floor(d / 30) });
 };
 
 export const timeUntil = (iso?: string | null) => {
   if (!iso) return '—';
   const diff = new Date(iso).getTime() - Date.now();
-  if (diff <= 0) return 'due now';
+  if (diff <= 0) return tGlobal('due now');
   const m = Math.floor(diff / 60_000);
-  if (m < 1) return 'in <1m';
-  if (m < 60) return `in ${m}m`;
+  if (m < 1) return tGlobal('in <1m');
+  if (m < 60) return tGlobal('in {m}m', { m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `in ${h}h ${m % 60}m`;
+  if (h < 24) return tGlobal('in {h}h {mm}m', { h, mm: m % 60 });
   const d = Math.floor(h / 24);
-  return `in ${d}d ${h % 24}h`;
+  return tGlobal('in {d}d {hh}h', { d, hh: h % 24 });
 };
 
 export const fmtDuration = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`);

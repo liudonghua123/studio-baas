@@ -5,10 +5,12 @@ import { api, currentProjectId, setProject } from '../api';
 import type { Project } from '../types';
 import { Badge, Empty, Modal, useToast } from '../components/ui';
 import { timeAgo } from '../lib/format';
+import { useT } from '../lib/locale';
 
 export default function Projects() {
   const nav = useNavigate();
   const toast = useToast();
+  const t = useT();
   const [params, setParams] = useSearchParams();
   const [list, setList] = useState<Project[]>([]);
   const [open, setOpen] = useState(params.get('new') === '1');
@@ -22,11 +24,11 @@ export default function Projects() {
   useEffect(() => { load(); }, []);
 
   const create = async () => {
-    if (!form.name.trim()) return toast.push('请填写项目名称', 'err');
+    if (!form.name.trim()) return toast.push(t('Project name is required'), 'err');
     setBusy(true);
     try {
       const p = await api.createProject(form);
-      toast.push(`项目 ${p.name} 已创建`);
+      toast.push(t('Project {name} created', { name: p.name }));
       setOpen(false);
       setParams({});
       setForm({ name: '', region: 'fra', plan: 'free', description: '' });
@@ -35,10 +37,10 @@ export default function Projects() {
   };
 
   const remove = async (p: Project) => {
-    if (!window.confirm(`删除项目 ${p.name}？其集合、函数、站点与文件都会一起删除。`)) return;
+    if (!window.confirm(t('Delete project {name}? Its collections, functions, sites and files go with it.', { name: p.name }))) return;
     try {
       await api.deleteProject(p.id);
-      toast.push('项目已删除');
+      toast.push(t('Project deleted'));
       if (active === p.id) setProject('');
       await load();
     } catch (e: any) { toast.push(e.message, 'err'); }
@@ -53,19 +55,19 @@ export default function Projects() {
     <div className="page">
       <div className="page-head">
         <div>
-          <div className="eyebrow"><Layers size={12} /> WORKSPACE</div>
-          <h1>Projects</h1>
+          <div className="eyebrow"><Layers size={12} /> {t('Workspace')}</div>
+          <h1>{t('Projects')}</h1>
           <p className="page-sub">
-            每个项目拥有独立的集合、桶、函数、站点、成员与 API Key。切换项目只影响当前上下文，数据互不可见。
+            {t('Each project has its own collections, buckets, functions, sites, members and API keys. Switching projects only changes the current context — data is never shared.')}
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn primary" onClick={() => setOpen(true)}><Plus size={14} /> New project</button>
+          <button className="btn primary" onClick={() => setOpen(true)}><Plus size={14} /> {t('New project')}</button>
         </div>
       </div>
 
       {list.length === 0 ? (
-        <div className="card"><Empty title="还没有项目" hint="创建一个项目开始使用" /></div>
+        <div className="card"><Empty title={t('No projects yet')} hint={t('Create a project to get started.')} /></div>
       ) : (
         <div className="proj-grid">
           {list.map((p) => (
@@ -77,17 +79,17 @@ export default function Projects() {
                   <div className="proj-key mono">{p.key}</div>
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {p.id === active && <Badge tone="ok" dot>current</Badge>}
+                  {p.id === active && <Badge tone="ok" dot>{t('current')}</Badge>}
                 </div>
               </div>
 
-              <p className="proj-desc">{p.description || 'No description yet.'}</p>
+              <p className="proj-desc">{p.description || t('No description yet.')}</p>
 
               <div className="proj-stats">
-                <div><Database size={12} /><b>{p.stats?.collections ?? 0}</b><span>collections</span></div>
-                <div><Boxes size={12} /><b>{p.stats?.functions ?? 0}</b><span>functions</span></div>
-                <div><Globe2 size={12} /><b>{p.stats?.sites ?? 0}</b><span>sites</span></div>
-                <div><Users2 size={12} /><b>{p.stats?.members ?? 0}</b><span>members</span></div>
+                <div><Database size={12} /><b>{p.stats?.collections ?? 0}</b><span>{t('collections')}</span></div>
+                <div><Boxes size={12} /><b>{p.stats?.functions ?? 0}</b><span>{t('functions')}</span></div>
+                <div><Globe2 size={12} /><b>{p.stats?.sites ?? 0}</b><span>{t('sites')}</span></div>
+                <div><Users2 size={12} /><b>{p.stats?.members ?? 0}</b><span>{t('members')}</span></div>
               </div>
 
               <div className="proj-meta-row">
@@ -95,15 +97,15 @@ export default function Projects() {
                 <span className="dim">·</span>
                 <span>{p.plan}</span>
                 <span className="dim">·</span>
-                <span className="dim">created {timeAgo(p.createdAt)}</span>
+                <span className="dim">{t('created {time}', { time: timeAgo(p.createdAt) })}</span>
               </div>
 
               <div className="proj-actions">
                 <button className="btn sm" onClick={() => enter(p)}>
-                  {p.id === active ? 'Open console' : 'Switch & open'} <ArrowRight size={12} />
+                  {p.id === active ? t('Open console') : t('Switch & open')} <ArrowRight size={12} />
                 </button>
-                <button className="btn sm ghost" onClick={() => { setProject(p.id); nav('/members'); }}>Members</button>
-                <button className="icon-btn" style={{ marginLeft: 'auto' }} title="Delete project" onClick={() => remove(p)}>
+                <button className="btn sm ghost" onClick={() => { setProject(p.id); nav('/members'); }}>{t('Members')}</button>
+                <button className="icon-btn" style={{ marginLeft: 'auto' }} title={t('Delete project')} onClick={() => remove(p)}>
                   <Trash2 size={13} />
                 </button>
               </div>
@@ -115,37 +117,37 @@ export default function Projects() {
       <Modal
         open={open}
         onClose={() => { setOpen(false); setParams({}); }}
-        title="New project"
-        subtitle="资源按项目隔离，可分别配置成员与权限"
+        title={t('New project')}
+        subtitle={t('Resources are isolated per project, with members and permissions configured separately.')}
         footer={
           <>
-            <button className="btn ghost" onClick={() => { setOpen(false); setParams({}); }}>Cancel</button>
-            <button className="btn primary" disabled={busy} onClick={create}>{busy ? 'Creating…' : 'Create project'}</button>
+            <button className="btn ghost" onClick={() => { setOpen(false); setParams({}); }}>{t('Cancel')}</button>
+            <button className="btn primary" disabled={busy} onClick={create}>{busy ? t('Creating…') : t('Create project')}</button>
           </>
         }
       >
-        <div className="field"><label>Name</label>
-          <input className="input" placeholder="e.g. Acme Production" value={form.name}
+        <div className="field"><label>{t('Name')}</label>
+          <input className="input" placeholder={t('e.g. Acme Production')} value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></div>
         <div className="field-row">
-          <div className="field"><label>Region</label>
+          <div className="field"><label>{t('Region')}</label>
             <select className="input" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
-              <option value="fra">Frankfurt (fra)</option>
-              <option value="ams">Amsterdam (ams)</option>
-              <option value="iad">Washington (iad)</option>
-              <option value="sgp">Singapore (sgp)</option>
+              <option value="fra">{t('Frankfurt (fra)')}</option>
+              <option value="ams">{t('Amsterdam (ams)')}</option>
+              <option value="iad">{t('Washington (iad)')}</option>
+              <option value="sgp">{t('Singapore (sgp)')}</option>
             </select>
           </div>
-          <div className="field"><label>Plan</label>
+          <div className="field"><label>{t('Plan')}</label>
             <select className="input" value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
-              <option value="free">Free</option>
-              <option value="pro">Pro</option>
-              <option value="enterprise">Enterprise</option>
+              <option value="free">{t('Free')}</option>
+              <option value="pro">{t('Pro')}</option>
+              <option value="enterprise">{t('Enterprise')}</option>
             </select>
           </div>
         </div>
-        <div className="field"><label>Description</label>
-          <textarea className="input" rows={3} placeholder="What lives in this project?"
+        <div className="field"><label>{t('Description')}</label>
+          <textarea className="input" rows={3} placeholder={t('What lives in this project?')}
             value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </div>
       </Modal>

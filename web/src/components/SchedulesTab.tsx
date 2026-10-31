@@ -6,6 +6,7 @@ import { api } from '../api';
 import type { Schedule } from '../types';
 import { Badge, Empty, Modal, useToast } from '../components/ui';
 import { useAuth } from '../lib/auth';
+import { useT } from '../lib/locale';
 import { fmtInZone, timeAgo, timeUntil, zoneLabel } from '../lib/format';
 
 const PRESETS = [
@@ -21,6 +22,7 @@ const TZS = ['UTC', 'Europe/Berlin', 'Europe/London', 'America/New_York', 'Asia/
 export default function SchedulesTab({ functionId, functionName }: { functionId: string; functionName: string }) {
   const toast = useToast();
   const { can } = useAuth();
+  const t = useT();
   const [list, setList] = useState<Schedule[]>([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ cron: '0 2 * * *', timezone: 'UTC' });
@@ -48,7 +50,7 @@ export default function SchedulesTab({ functionId, functionName }: { functionId:
   const create = async () => {
     try {
       await api.createSchedule(functionId, form);
-      toast.push('调度已创建');
+      toast.push(t('Schedule created'));
       setOpen(false);
       load();
     } catch (e: any) { toast.push(e.message, 'err'); }
@@ -65,14 +67,14 @@ export default function SchedulesTab({ functionId, functionName }: { functionId:
     setBusy(s.id);
     try {
       const r = await api.runSchedule(s.id);
-      toast.push(r.status === 'completed' ? `执行完成（${r.duration}ms）` : '执行失败', r.status === 'completed' ? 'ok' : 'err');
+      toast.push(r.status === 'completed' ? t('Completed in {duration}ms', { duration: r.duration }) : t('Execution failed'), r.status === 'completed' ? 'ok' : 'err');
       load();
     } catch (e: any) { toast.push(e.message, 'err'); } finally { setBusy(null); }
   };
 
   const remove = async (s: Schedule) => {
-    if (!window.confirm(`删除调度 ${s.cron}？`)) return;
-    try { await api.deleteSchedule(s.id); toast.push('已删除'); load(); } catch (e: any) { toast.push(e.message, 'err'); }
+    if (!window.confirm(t('Delete schedule {cron}?', { cron: s.cron }))) return;
+    try { await api.deleteSchedule(s.id); toast.push(t('Deleted')); load(); } catch (e: any) { toast.push(e.message, 'err'); }
   };
 
   const writable = can('functions.write');
@@ -83,20 +85,20 @@ export default function SchedulesTab({ functionId, functionName }: { functionId:
       <div className="card">
         <div className="card-head">
           <div>
-            <div className="card-title">Scheduled executions</div>
-            <div className="card-sub">按 cron 定时触发 {functionName}，执行记录与手动调用一样可追溯</div>
+            <div className="card-title">{t('Scheduled executions')}</div>
+            <div className="card-sub">{t('Triggers {name} on a cron schedule. Every run is logged like a manual invocation.', { name: functionName })}</div>
           </div>
           <button className="btn sm primary" style={{ marginLeft: 'auto' }} disabled={!writable} onClick={() => setOpen(true)}>
-            <Plus size={13} /> Add schedule
+            <Plus size={13} /> {t('Add schedule')}
           </button>
         </div>
         <div className="card-body tight">
           {list.length === 0 ? (
-            <Empty title="没有定时任务" hint="添加一个 cron 表达式，函数会按计划自动执行" icon={<CalendarClock size={26} />} />
+            <Empty title={t('No schedules yet')} hint={t('Add a cron expression and the function runs automatically on that schedule.')} icon={<CalendarClock size={26} />} />
           ) : (
             <table className="table">
               <thead>
-                <tr><th>Schedule</th><th>Timezone</th><th>Next run</th><th>Last run</th><th style={{ width: 132 }} /></tr>
+                <tr><th>{t('Schedule')}</th><th>{t('Timezone')}</th><th>{t('Next run')}</th><th>{t('Last run')}</th><th style={{ width: 132 }} /></tr>
               </thead>
               <tbody>
                 {list.map((s) => (
@@ -122,17 +124,17 @@ export default function SchedulesTab({ functionId, functionName }: { functionId:
                           <Badge tone={s.lastStatus === 'completed' ? 'green' : 'red'} dot>{s.lastStatus}</Badge>
                           <span className="tiny dim">{timeAgo(s.lastRunAt)}</span>
                         </div>
-                      ) : <span className="tiny dim">never</span>}
+                      ) : <span className="tiny dim">{t('never')}</span>}
                     </td>
                     <td>
                       <div className="flex" style={{ gap: 4, justifyContent: 'flex-end' }}>
-                        <button className="mini-btn" title="Run now" disabled={!runnable || busy === s.id} onClick={() => runNow(s)}>
+                        <button className="mini-btn" title={t('Run now')} disabled={!runnable || busy === s.id} onClick={() => runNow(s)}>
                           {busy === s.id ? <Loader2 size={12} className="spin" /> : <Zap size={12} />}
                         </button>
-                        <button className="mini-btn" title={s.enabled ? 'Pause' : 'Resume'} disabled={!writable} onClick={() => toggle(s)}>
+                        <button className="mini-btn" title={s.enabled ? t('Pause') : t('Resume')} disabled={!writable} onClick={() => toggle(s)}>
                           {s.enabled ? <Pause size={12} /> : <Play size={12} />}
                         </button>
-                        <button className="mini-btn" title="Delete" disabled={!writable} onClick={() => remove(s)}>
+                        <button className="mini-btn" title={t('Delete')} disabled={!writable} onClick={() => remove(s)}>
                           <Trash2 size={12} />
                         </button>
                       </div>
@@ -149,44 +151,46 @@ export default function SchedulesTab({ functionId, functionName }: { functionId:
         <div className="card-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <Clock size={14} style={{ color: 'var(--dim)', marginTop: 2 }} />
           <div className="tiny dim" style={{ lineHeight: 1.7 }}>
-            调度器每 15 秒扫描一次到期任务，命中后用 <span className="mono">trigger=schedule</span> 执行函数，payload 注入
-            <span className="mono"> scheduledAt / cron / source </span>。时区按 IANA 名称解析，跨时区团队不会算错时间。
+            {t('The scheduler scans for due jobs every 15 seconds and runs the function with')}{' '}
+            <span className="mono">trigger=schedule</span>{' '}
+            {t('and injects')} <span className="mono">scheduledAt / cron / source</span>{' '}
+            {t('into the payload. Timezones are resolved by IANA name, so teams spread across zones never get the time wrong.')}
           </div>
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Add schedule" subtitle={`触发 ${functionName}`}
+      <Modal open={open} onClose={() => setOpen(false)} title={t('Add schedule')} subtitle={t('Triggers {name}', { name: functionName })}
         footer={<>
-          <button className="btn ghost" onClick={() => setOpen(false)}>Cancel</button>
-          <button className="btn primary" disabled={!!error || !form.cron} onClick={create}>Create schedule</button>
+          <button className="btn ghost" onClick={() => setOpen(false)}>{t('Cancel')}</button>
+          <button className="btn primary" disabled={!!error || !form.cron} onClick={create}>{t('Create schedule')}</button>
         </>}>
-        <div className="field"><label>Preset</label>
+        <div className="field"><label>{t('Preset')}</label>
           <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
             {PRESETS.map((p) => (
               <button key={p.cron} className={`btn sm ${form.cron === p.cron ? 'primary' : 'ghost'}`}
-                onClick={() => setForm({ ...form, cron: p.cron })}>{p.label}</button>
+                onClick={() => setForm({ ...form, cron: p.cron })}>{t(p.label)}</button>
             ))}
           </div>
         </div>
         <div className="field-row">
-          <div className="field"><label>Cron expression</label>
+          <div className="field"><label>{t('Cron expression')}</label>
             <input className="input mono" value={form.cron} onChange={(e) => setForm({ ...form, cron: e.target.value })} />
-            <div className="hint">分 时 日 月 周，例如 0 2 * * *</div>
+            <div className="hint">{t('Minute hour day month weekday, e.g. 0 2 * * *')}</div>
           </div>
-          <div className="field"><label>Timezone</label>
+          <div className="field"><label>{t('Timezone')}</label>
             <select className="input" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
-              {TZS.map((t) => <option key={t} value={t}>{t}</option>)}
+              {TZS.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
             </select>
           </div>
         </div>
 
         {error ? (
-          <div className="tiny" style={{ color: '#ff8aa6' }}>{error}</div>
+          <div className="tiny" style={{ color: 'var(--pink-text)' }}>{error}</div>
         ) : preview && (
           <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '10px 12px' }}>
             <div className="flex" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-              <span className="tiny dim">Next runs</span>
-              <span className="tiny" style={{ color: '#00b894' }}><RefreshCw size={10} /> {preview.description}</span>
+              <span className="tiny dim">{t('Next runs')}</span>
+              <span className="tiny" style={{ color: 'var(--green-text)' }}><RefreshCw size={10} /> {preview.description}</span>
             </div>
             {preview.next.map((n, i) => (
               <div key={i} className="flex" style={{ justifyContent: 'space-between', padding: '2px 0' }}>
