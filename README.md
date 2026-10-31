@@ -249,7 +249,8 @@ studio-baas/
 - 云函数跑在独立的 `worker_threads` 线程里，超时直接 `terminate()`，死循环不会再拖垮 API（仍是共享内核，不是容器级隔离）；
 - API Key 只存 SHA-256 摘要，明文仅在创建响应里出现一次，列表只显示预览；
 - 文件存于本地 `server/data/uploads`，桶加密标记仅为元数据；GitHub token 只存服务端、不回传前端；
-- `x-studio-act-as`（View as role）是**演示后门**，任何调用方都能声称自己是 owner；公网部署前请移除或加环境开关；
+- `x-studio-act-as`（View as role）仅供演示：无凭据时可声明任意角色；**带会话时只能往下看，不能自我提权**；公网部署建议 `STUDIO_ALLOW_ACT_AS=0` 关掉；
+- 不带任何凭据的请求仍按「演示 owner」放行，这是本地体验的取舍——真要上线请把它改成 401；
 - 公网隧道是公开可访问的，演示完请关闭，且不要在公网实例里填真实 Key。
 
 ## License

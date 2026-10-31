@@ -381,6 +381,20 @@ if s == 201:
           f'{item.get("preview")}')
     call('DELETE', f"/v1/api-keys/{k2['id']}")
 
+# ------------------------------------------------- 15 act-as cannot escalate
+if pid and uid_:
+    call('POST', '/v1/members', {'userId': uid_, 'role': 'viewer'}, project=pid)
+    s, lg2, _ = call('POST', '/v1/account/sessions', {'email': uemail, 'password': 'Passw0rd!'})
+    sess = lg2.get('secret') if isinstance(lg2, dict) else None
+    if sess:
+        s, r, _ = call('GET', '/v1/auth/me', project=pid, headers={'x-studio-session': sess, 'x-studio-act-as': 'owner'})
+        check('rbac', 'session cannot self-promote via act-as', r.get('role') == 'viewer', f'{r.get("role")}')
+        s, r, _ = call('POST', '/v1/databases/collections', {'name': 'Escalate'}, project=pid,
+                       headers={'x-studio-session': sess, 'x-studio-act-as': 'owner'})
+        check('rbac', 'act-as cannot grant a write the session lacks', s == 403, f'{s} {r}')
+        s, r, _ = call('GET', '/v1/auth/me', act_as='viewer')
+        check('rbac', 'credential-less demo mode still honours act-as', r.get('role') == 'viewer', f'{r.get("role")}')
+
 # ------------------------------------------------------------------ cleanup
 for path in [f'/v1/functions/{fnid}' if fnid else None,
              f'/v1/sites/{sid}' if sid else None,

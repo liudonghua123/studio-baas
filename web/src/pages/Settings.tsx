@@ -183,6 +183,7 @@ export default function Settings() {
                 <li>API keys are stored as SHA-256 digests — the plaintext is returned once on creation, and the list only shows a preview.</li>
                 <li>Document-level permissions (<span className="mono">read("user:…")</span>, <span className="mono">team:…/role</span>) are enforced on list, get, update and delete when a collection enables document security.</li>
                 <li>Files are stored on the local filesystem under <span className="mono">server/data/uploads</span>; bucket encryption flags are metadata only in this demo.</li>
+                <li><b>View as role</b> is a demo affordance: without a session you can claim any role, but a signed-in session can only look <i>down</i>. Set <span className="mono">STUDIO_ALLOW_ACT_AS=0</span> to disable it.</li>
                 <li>Never commit a real DeepSeek key. Prefer the <span className="mono">DEEPSEEK_API_KEY</span> environment variable.</li>
               </ul>
             </div>

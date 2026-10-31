@@ -18,6 +18,21 @@ export interface ResolvedAuth {
  *   3. x-studio-act-as  —— 本地演示用的“以某角色查看”，方便验证 RBAC
  *   4. 兜底 demo owner   —— 该项目的第一位 owner，保证开箱即用
  */
+/** 角色强弱，用于「以角色查看」不得提权 */
+const RANK: Record<string, number> = { viewer: 1, developer: 2, admin: 3, owner: 4 };
+
+/**
+ * `x-studio-act-as` 是演示开关：没有凭据时可以任意声明角色（控制台的 View as role），
+ * 但**已登录时必须遵守两条**，否则它就是一个自称 owner 的后门：
+ *   1. 不能声明比会话本身更高的角色（不纵向提权）；
+ *   2. `STUDIO_ALLOW_ACT_AS=0` 可整体关闭（公网部署建议关掉）。
+ */
+function actAsAllowedFor(role: string | null): boolean {
+  if (process.env.STUDIO_ALLOW_ACT_AS === '0') return false;
+  if (!role) return true;                 // 无凭据的演示模式
+  return true;                            // 有会话时由调用处再比较 RANK
+}
+
 export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'): ResolvedAuth {
   const key = req.header('x-api-key');
   if (key) {
@@ -42,17 +57,29 @@ export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'):
     };
   }
 
+  const actAs = req.header('x-studio-act-as');
+  const wantActAs = !!actAs && !!RANK[actAs];
+
   const session = req.header('x-studio-session');
   if (session) {
     const row = db.prepare(
       'SELECT s.*, u.name, u.email FROM sessions s JOIN users u ON u.id=s.userId WHERE s.secret=?',
     ).get(session) as any;
     if (row && new Date(row.expiresAt).getTime() > Date.now()) {
-      const role = members.roleOf(fallbackProjectId, row.userId);
+      const own = members.roleOf(fallbackProjectId, row.userId) || 'viewer';
+      // 只能「往下看」：viewer 不能借这个头把自己变成 owner
+      if (wantActAs && actAsAllowedFor(own) && RANK[actAs!] <= RANK[own]) {
+        return {
+          principal: {
+            type: 'user', id: row.userId, name: row.name,
+            role: actAs!,
+          },
+        };
+      }
       return {
         principal: {
           type: 'user', id: row.userId, name: row.name,
-          role: role || 'viewer',
+          role: own,
         },
       };
     }
@@ -65,12 +92,11 @@ export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'):
     };
   }
 
-  const actAs = req.header('x-studio-act-as');
-  if (actAs && ['owner', 'admin', 'developer', 'viewer'].includes(actAs)) {
+  if (wantActAs && actAsAllowedFor(null)) {
     return {
       principal: {
-        type: 'demo', id: 'demo', name: `Demo ${actAs[0].toUpperCase()}${actAs.slice(1)}`,
-        role: actAs,
+        type: 'demo', id: 'demo', name: `Demo ${actAs![0].toUpperCase()}${actAs!.slice(1)}`,
+        role: actAs!,
       },
     };
   }
