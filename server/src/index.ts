@@ -478,11 +478,16 @@ app.get('/v1/logs', guard('logs.read'), (req, res) => {
 /* -------------------------------------------------------------- realtime */
 app.get('/v1/realtime', (req, res) => {
   res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    // no-transform：告知 Cloudflare 等中间层不要压缩/改写，否则事件流会被整段缓冲
+    'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  res.flushHeaders?.();
+  // 注意：Cloudflare 快速隧道（*.trycloudflare.com）会把 GET 响应整段缓冲到结束，
+  // 所以通过隧道访问时这条事件流不会实时到达；控制台本身用的是轮询（Overview 20s、
+  // Logs 5s），不依赖 SSE，隧道下功能不受影响。需要真实时流请用命名隧道。
   res.write(`event: ready\ndata: ${JSON.stringify({ at: now() })}\n\n`);
   const onEvent = (e: any) => res.write(`event: message\ndata: ${JSON.stringify(e)}\n\n`);
   bus.on('event', onEvent);

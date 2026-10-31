@@ -22,7 +22,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [使用指南](./docs/使用指南.md) | 逐模块截图 + 操作步骤，21 张界面图 |
+| [使用指南](./docs/使用指南.md) | 逐模块截图 + 操作步骤，23 张界面图 |
 | [Appwrite 核心功能分析](./docs/Appwrite-核心功能分析.md) | 产品定位、架构、七大服务拆解、竞品对比、生产化差距（[PDF 版](./docs/Appwrite-核心功能分析.pdf)） |
 
 ## 核心交互
@@ -145,7 +145,15 @@ pnpm tunnel        # 开发模式（保留 HMR），隧道指向 :5173
 pnpm tunnel:prod   # 生产模式，隧道指向 :5174
 ```
 
-脚本会等到 `/v1/health` 返回 200 才打印地址，并写入 `.tunnel/url.txt`。页面、API、函数执行、站点预览 iframe、SSE 日志、HMR WebSocket 均已验证可穿透。
+脚本会等到 `/v1/health` 返回 200 才打印地址，并写入 `.tunnel/url.txt`。页面、静态资源、API、函数执行、站点预览 iframe、Webhook 回调均已验证可穿透。
+
+> **快速隧道不支持 SSE**：`*.trycloudflare.com` 会把 GET 响应整段缓冲到连接结束，所以 `/v1/realtime` 事件流在隧道下不会实时到达。控制台本身用轮询（Dashboard 20s、Logs 5s），隧道下功能完整；需要真实时流请改用命名隧道（`cloudflared tunnel --url` 以外的 `tunnel run` + 自有域名）。
+
+设置好 GitHub 仓库的 Webhook 后，隧道域名也可以直接接收回调 —— 函数页里的 Payload URL 会自动使用当前访问域名，把 `https://<随机域名>.trycloudflare.com/v1/git/webhook/<id>` 填进 GitHub 即可，push 后控制台立即多一条部署记录。
+
+![Through the tunnel](./docs/screenshots/20-tunnel.png)
+
+![Webhook over the tunnel](./docs/screenshots/20b-tunnel-webhook.png)
 
 ## 配置 DeepSeek
 
