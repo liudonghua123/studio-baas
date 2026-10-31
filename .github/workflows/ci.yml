@@ -29,3 +29,23 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # 起一个装了种子数据的实例，把 108 条 API 断言全跑一遍。
+      # 退出码非 0 直接让 job 失败，避免“编译过但行为坏了”悄悄合入。
+      - name: API smoke test
+        run: |
+          DATA_DIR="$RUNNER_TEMP/data" PORT=5174 node server/dist/index.js > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5174/v1/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:5174/v1/health
+          python3 scripts/api-smoke.py
+
+      - name: Upload smoke results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-smoke-result
+          path: /tmp/api-smoke-result.json
+          if-no-files-found: ignore
