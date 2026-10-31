@@ -311,16 +311,21 @@ app.get('/v1/storage/buckets/:id/files', guard('storage.read'), wrap((req, res) 
 const rejectOversizedUpload: express.RequestHandler = (req, res, next) => {
   const bucket = store.getBucket(req.params.id);
   const declared = Number(req.headers['content-length'] || 0);
-  if (bucket && declared > bucket.maxFileSize) {
-    req.resume();
-    res.setHeader('Connection', 'close');
-    return res.status(413).json({
-      ok: false,
-      error: `File exceeds bucket limit of ${bucket.maxFileSize} bytes`,
-      maxFileSize: bucket.maxFileSize,
-    });
-  }
-  next();
+  if (!bucket || declared <= bucket.maxFileSize) return next();
+
+  const payload = {
+    ok: false,
+    error: `File exceeds bucket limit of ${bucket.maxFileSize} bytes`,
+    maxFileSize: bucket.maxFileSize,
+  };
+  // 关键：不能立刻 end()。HTTP 服务器在请求体没收完时响应并关闭连接，
+  // 客户端还在写剩下的字节，拿到的是 EPIPE 而不是这个 413（CI 上就是这么挂的）。
+  // 这里把剩余字节读掉丢弃（不进内存、不解析），读完再回响应。
+  const reply = () => { if (!res.headersSent) res.status(413).json(payload); };
+  if (req.readableEnded) return reply();
+  req.once('end', reply);
+  req.once('error', reply);
+  req.resume();
 };
 
 app.post('/v1/storage/buckets/:id/files', guard('storage.write'), rejectOversizedUpload, upload.single('file'), wrap((req, res) => {
