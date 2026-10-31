@@ -3,6 +3,7 @@ import {
   listDocuments, createDocument, updateDocument, deleteDocument, getDocument,
   listBuckets, listFiles, deleteFile, getFile, deleteBucket,
   listFunctions, getFunction, updateFunction, executeFunction, listExecutions, createFunction,
+  listVersions, restoreVersion,
   listSites, getSite, updateSite, deploySite,
   listUsers, createUser, deleteUser,
   sendMessage, listMessages,
@@ -310,6 +311,40 @@ export const tools: ToolDef[] = [
       if (!f) throw new Error(`Function "${a.function}" not found`);
       const r = await executeFunction(f.id, a.payload ?? {}, 'ai');
       return { status: r.status, duration: r.duration, logs: r.logs, response: truncate(r.response, 2000), errors: r.errors };
+    },
+  },
+  {
+    name: 'list_function_versions',
+    description: 'List the immutable deploy history of a function (version, label, author, time).',
+    parameters: {
+      type: 'object',
+      properties: { function: { type: 'string' }, limit: { type: 'number' } },
+      required: ['function'],
+    },
+    summary: (a) => `查看 ${a.function} 的版本`,
+    run: (a) => {
+      const f = resolveFunction(a.function);
+      if (!f) throw new Error(`Function "${a.function}" not found`);
+      const versions = listVersions(f.id, Math.min(Number(a.limit) || 10, 30));
+      return versions.map((v) => ({ version: v.version, label: v.label, by: v.createdBy, at: v.createdAt }));
+    },
+  },
+  {
+    name: 'restore_function_version',
+    description: 'Roll a function back to an earlier version. The current code is kept as a new version.',
+    parameters: {
+      type: 'object',
+      properties: { function: { type: 'string' }, version: { type: 'number', description: 'Version number, e.g. 1' } },
+      required: ['function', 'version'],
+    },
+    summary: (a) => `把 ${a.function} 回滚到 v${a.version}`,
+    run: (a) => {
+      const f = resolveFunction(a.function);
+      if (!f) throw new Error(`Function "${a.function}" not found`);
+      const target = listVersions(f.id, 30).find((v) => v.version === Number(a.version));
+      if (!target) throw new Error(`Version v${a.version} not found`);
+      const updated = restoreVersion(f.id, target.id);
+      return { ok: true, version: updated?.code ? target.version : target.version, code: (updated?.code || '').slice(0, 400) };
     },
   },
   {

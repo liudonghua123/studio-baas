@@ -4,7 +4,7 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { migrate, db, now } from './db.js';
+import { migrate, backfillFunctionVersions, db, now } from './db.js';
 import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit, seedDomains } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
@@ -31,6 +31,8 @@ seedMembers();
 seedSchedules();
 seedGit();
 seedDomains();
+// 种子函数是直接 INSERT 的，补一次版本基线（幂等）
+backfillFunctionVersions();
 
 const app = express();
 app.use(cors());
@@ -317,6 +319,24 @@ app.get('/v1/executions', guard('functions.read'), (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 30, 200);
   res.json({ total: store.countExecutions(), executions: store.listExecutions(undefined, limit) });
 });
+
+/* ---------------------------------------------------- function versions */
+app.get('/v1/functions/:id/versions', guard('functions.read'), wrap((req, res) => {
+  if (!store.getFunction(req.params.id)) return fail(res, new Error('Function not found'), 404);
+  const versions = store.listVersions(req.params.id, Math.min(Number(req.query.limit) || 30, 100));
+  res.json({ total: versions.length, versions });
+}));
+
+app.get('/v1/functions/:id/versions/:vid', guard('functions.read'), wrap((req, res) => {
+  const v = store.getVersion(req.params.id, req.params.vid);
+  if (!v) return fail(res, new Error('Version not found'), 404);
+  res.json(v);
+}));
+
+// 回滚不改历史：旧代码覆盖当前代码，同时留下一条 "restored from vN" 的快照
+app.post('/v1/functions/:id/versions/:vid/restore', guard('functions.write'), wrap((req, res) => {
+  res.json(store.restoreVersion(req.params.id, req.params.vid));
+}));
 
 /* ----------------------------------------------------- function schedules */
 app.get('/v1/schedules', guard('functions.read'), (_req, res) => {

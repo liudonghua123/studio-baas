@@ -395,6 +395,32 @@ if pid and uid_:
         s, r, _ = call('GET', '/v1/auth/me', act_as='viewer')
         check('rbac', 'credential-less demo mode still honours act-as', r.get('role') == 'viewer', f'{r.get("role")}')
 
+# --------------------------------------------------------- 16 function versions
+if fnid:
+    s, vl0, _ = call('GET', f'/v1/functions/{fnid}/versions')
+    base = len(vl0.get('versions', []))
+    check('versions', 'a saved function always has a baseline snapshot', base >= 1, f'{base}')
+
+    s, cur, _ = call('GET', f'/v1/functions/{fnid}')
+    before = cur.get('code', '')
+    v2code = "export default async ({ res }) => res.json({ v: 2 });"
+    call('PATCH', f'/v1/functions/{fnid}', {'code': v2code})
+    s, vl1, _ = call('GET', f'/v1/functions/{fnid}/versions')
+    check('versions', 'saving code appends an immutable version',
+          len(vl1.get('versions', [])) == base + 1 and vl1['versions'][0]['label'] == 'save',
+          f'{len(vl1.get("versions", []))} vs {base}')
+
+    old = next((v for v in vl1.get('versions', []) if v.get('code', '').strip() == before.strip()), None)
+    check('versions', 'the previous code is retrievable', old is not None, 'no matching version')
+    if old:
+        s, rs, _ = call('POST', f'/v1/functions/{fnid}/versions/{old["id"]}/restore')
+        check('versions', 'restore writes the old code back', s == 200 and rs.get('code', '').strip() == before.strip(),
+              f'{s} {str(rs)[:120]}')
+        s, vl2, _ = call('GET', f'/v1/functions/{fnid}/versions')
+        check('versions', 'restore is recorded as a new version',
+              len(vl2.get('versions', [])) == base + 2 and 'restored' in (vl2['versions'][0].get('label') or ''),
+              f'{len(vl2.get("versions", []))} {vl2["versions"][0].get("label")}')
+
 # ------------------------------------------------------------------ cleanup
 for path in [f'/v1/functions/{fnid}' if fnid else None,
              f'/v1/sites/{sid}' if sid else None,

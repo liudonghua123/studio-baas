@@ -461,6 +461,7 @@ export function createFunction(input: { name: string; runtime?: string; code?: s
     input.code || DEFAULT_FUNCTION_CODE, input.schedule || '', input.timeout ?? 15,
     JSON.stringify(input.env || {}), 1, 'any', t, t, pid(),
   );
+  snapshotVersion(id, input.code || DEFAULT_FUNCTION_CODE, 'initial');
   bus.publish({ type: 'function', action: 'create', resource: input.name });
   return getFunction(id)!;
 }
@@ -483,6 +484,8 @@ export function updateFunction(id: string, patch: Partial<{
     patch.timeout ?? cur.timeout, (patch.enabled ?? cur.enabled) ? 1 : 0,
     patch.schedule ?? cur.schedule, patch.runtime ?? cur.runtime, patch.entrypoint ?? cur.entrypoint, now(), id,
   );
+  // 每次代码变更都是一次不可变部署，可随时回滚
+  if (patch.code !== undefined && patch.code !== cur.code) snapshotVersion(id, patch.code, 'save');
   bus.publish({ type: 'function', action: 'update', resource: cur.name });
   return getFunction(id);
 }
@@ -491,6 +494,7 @@ export function deleteFunction(id: string) {
   const cur = getFunction(id);
   if (!cur) return false;
   db.prepare('DELETE FROM executions WHERE functionId=?').run(id);
+  db.prepare('DELETE FROM functionVersions WHERE functionId=?').run(id);
   // 删除函数时一并清理它的附属资源，避免悬挂的域名/调度/仓库绑定
   try {
     db.prepare('DELETE FROM functionDomains WHERE functionId=?').run(id);
@@ -501,6 +505,59 @@ export function deleteFunction(id: string) {
   db.prepare('DELETE FROM functions WHERE id=?').run(id);
   bus.publish({ type: 'function', action: 'delete', resource: cur.name });
   return true;
+}
+
+/* ------------------------------------------------------ function versions */
+
+/** 保留最近 N 个版本，避免每次保存都无限增长 */
+const VERSION_KEEP = 30;
+
+export interface FunctionVersion {
+  id: string; functionId: string; version: number; code: string;
+  label: string | null; createdBy: string | null; createdAt: string;
+}
+
+const versionFromRow = (r: any): FunctionVersion => ({
+  id: r.id, functionId: r.functionId, version: r.version, code: r.code,
+  label: r.label, createdBy: r.createdBy, createdAt: r.createdAt,
+});
+
+export function listVersions(functionId: string, limit = VERSION_KEEP): FunctionVersion[] {
+  return (db.prepare(
+    'SELECT * FROM functionVersions WHERE functionId=? AND projectId=? ORDER BY version DESC LIMIT ?',
+  ).all(functionId, pid(), limit) as any[]).map(versionFromRow);
+}
+
+export function getVersion(functionId: string, versionId: string): FunctionVersion | null {
+  const r = db.prepare('SELECT * FROM functionVersions WHERE id=? AND functionId=? AND projectId=?')
+    .get(versionId, functionId, pid()) as any;
+  return r ? versionFromRow(r) : null;
+}
+
+/** 写入一条不可变快照；保存代码与回滚都走这里 */
+function snapshotVersion(functionId: string, code: string, label: string | null) {
+  const max = (db.prepare('SELECT COALESCE(MAX(version),0) v FROM functionVersions WHERE functionId=?')
+    .get(functionId) as any).v as number;
+  const version = max + 1;
+  db.prepare(`INSERT INTO functionVersions (id,projectId,functionId,version,code,label,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?)`).run(
+    uid('fv_'), pid(), functionId, version, code, label,
+    currentPrincipal()?.name || 'system', now(),
+  );
+  db.prepare('DELETE FROM functionVersions WHERE functionId=? AND version <= ?').run(functionId, version - VERSION_KEEP);
+  return version;
+}
+
+/** 回滚 = 用旧代码覆盖当前代码，并留下一条新版本（历史仍然只增不改） */
+export function restoreVersion(functionId: string, versionId: string): (ReturnType<typeof getFunction>) {
+  const fn = getFunction(functionId);
+  if (!fn) throw new Error('Function not found');
+  const v = getVersion(functionId, versionId);
+  if (!v) throw new Error('Version not found');
+  db.prepare('UPDATE functions SET code=?, updatedAt=? WHERE id=?').run(v.code, now(), functionId);
+  snapshotVersion(functionId, v.code, `restored from v${v.version}`);
+  bus.publish({ type: 'function', action: 'restore', resource: fn.name });
+  return getFunction(functionId);
 }
 
 export function countExecutions(functionId?: string): number {

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, Play, Save, Trash2, Clock, Terminal, Settings2, Plus, X,
   ChevronRight, CheckCircle2, AlertCircle, Loader2, Boxes, KeyRound,
-  Code2, Globe2, CalendarClock, GitBranch,
+  Code2, Globe2, CalendarClock, GitBranch, History,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Execution, FunctionDef } from '../types';
@@ -14,6 +14,7 @@ import { useAuth } from '../lib/auth';
 import DomainsTab from '../components/DomainsTab';
 import SchedulesTab from '../components/SchedulesTab';
 import GitHubTab from '../components/GitHubTab';
+import VersionsTab from '../components/VersionsTab';
 
 export default function FunctionDetail() {
   const { id } = useParams();
@@ -34,7 +35,7 @@ export default function FunctionDetail() {
   const [envOpen, setEnvOpen] = useState(false);
   const [envRows, setEnvRows] = useState<{ k: string; v: string }[]>([]);
   const [meta, setMeta] = useState({ name: '', timeout: 15, schedule: '' });
-  const [view, setView] = useState<'code' | 'domains' | 'schedules' | 'git'>('code');
+  const [view, setView] = useState<'code' | 'versions' | 'domains' | 'schedules' | 'git'>('code');
 
   const load = async () => {
     try {
@@ -137,6 +138,9 @@ export default function FunctionDetail() {
       <div className="fn-tabs">
         <button className={`tab ${view === 'code' ? 'active' : ''}`} onClick={() => setView('code')}>
           <Code2 size={13} /> Code
+        </button>
+        <button className={`tab ${view === 'versions' ? 'active' : ''}`} onClick={() => setView('versions')}>
+          <History size={13} /> Versions
         </button>
         <button className={`tab ${view === 'domains' ? 'active' : ''}`} onClick={() => setView('domains')}>
           <Globe2 size={13} /> Domains
@@ -270,7 +274,14 @@ export default function FunctionDetail() {
             </div>
           </div>
         </div>
-      </div>) : view === 'domains' ? (
+      </div>) : view === 'versions' ? (
+        <VersionsTab
+          functionId={fn.id}
+          functionName={fn.name}
+          currentCode={fn.code}
+          onRestored={load}
+        />
+      ) : view === 'domains' ? (
         <DomainsTab functionId={fn.id} functionName={fn.name} />
       ) : view === 'schedules' ? (
         <SchedulesTab functionId={fn.id} functionName={fn.name} />

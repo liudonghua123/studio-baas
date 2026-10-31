@@ -117,6 +117,11 @@ export function migrate() {
     id TEXT PRIMARY KEY, name TEXT, provider TEXT, model TEXT, systemPrompt TEXT,
     tools TEXT, createdAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS functionVersions (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, functionId TEXT NOT NULL,
+    version INTEGER NOT NULL, code TEXT NOT NULL, label TEXT, createdBy TEXT,
+    createdAt TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_docs_col ON documents(collectionId);
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
@@ -126,6 +131,7 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_domains_host ON functionDomains(hostname);
   CREATE INDEX IF NOT EXISTS idx_members_project ON members(projectId);
   CREATE INDEX IF NOT EXISTS idx_members_user ON members(userId);
+  CREATE INDEX IF NOT EXISTS idx_fnver_fn ON functionVersions(functionId, version DESC);
   `);
 
   /* ------------------------------------------- project scoping columns */
@@ -159,6 +165,30 @@ export function migrate() {
     db.transaction(() => { for (const k of legacy) upd.run(hashApiKey(k.secret), previewApiKey(k.secret), k.id); })();
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_apiKeys_hash ON apiKeys(secretHash)');
+
+  /* -------------------------------------------- function versions (v1.8) */
+  backfillFunctionVersions();
+}
+
+/**
+ * 老库 / 种子数据里的函数没有历史版本：给每个函数补一条 v1 作为「当前代码」的基线。
+ * 幂等——已经有版本的函数会被跳过，所以可以在每次启动、以及 seed 之后再调一次。
+ */
+export function backfillFunctionVersions() {
+  const unversioned = db.prepare(
+    `SELECT f.id, f.code, f.createdAt, COALESCE(f.projectId,'studio') AS projectId FROM functions f
+     WHERE NOT EXISTS (SELECT 1 FROM functionVersions v WHERE v.functionId=f.id)`,
+  ).all() as { id: string; code: string; createdAt: string; projectId: string }[];
+  if (unversioned.length) {
+    const ins = db.prepare(
+      'INSERT INTO functionVersions (id,projectId,functionId,version,code,label,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (const f of unversioned) {
+        ins.run(`fv_${f.id}_1`, f.projectId, f.id, 1, f.code, 'initial', 'system', f.createdAt);
+      }
+    })();
+  }
 }
 
 export const now = () => new Date().toISOString();

@@ -66,6 +66,10 @@ export interface Execution {
   duration: number; logs: string[]; response: any; errors: string[]; createdAt: string;
   statusCode?: number;
 }
+export interface FunctionVersion {
+  id: string; functionId: string; version: number; code: string;
+  label: string | null; createdBy: string | null; createdAt: string;
+}
 export interface SiteFile { path: string; content: string }
 export interface Site {
   id: string; name: string; framework: string; domain: string; entrypoint: string;

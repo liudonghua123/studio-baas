@@ -1,6 +1,6 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, FunctionDomain, GitCommit, GitDeploy, GitIntegration,
+  FileItem, FunctionDef, FunctionDomain, FunctionVersion, GitCommit, GitDeploy, GitIntegration,
   LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
 } from './types';
 
@@ -90,6 +90,8 @@ export const api = {
   deleteFunction: (id: string) => del(`/v1/functions/${id}`),
   execute: (id: string, payload: any) => post<Execution>(`/v1/functions/${id}/executions`, payload),
   executions: (id: string) => get<{ executions: Execution[] }>(`/v1/functions/${id}/executions`),
+  versions: (id: string) => get<{ total: number; versions: FunctionVersion[] }>(`/v1/functions/${id}/versions`),
+  restoreVersion: (id: string, vid: string) => post<FunctionDef>(`/v1/functions/${id}/versions/${vid}/restore`),
   allExecutions: () => get<{ executions: Execution[] }>('/v1/executions'),
   domains: (id: string) => get<{ domains: FunctionDomain[] }>(`/v1/functions/${id}/domains`),
   addDomain: (id: string, hostname: string) => post<FunctionDomain>(`/v1/functions/${id}/domains`, { hostname }),
