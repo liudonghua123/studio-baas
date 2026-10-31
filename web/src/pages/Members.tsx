@@ -155,9 +155,9 @@ export default function Members() {
             </div>
             <Badge style={{ marginLeft: 'auto' }}>{me?.permissions?.length || 0} permissions</Badge>
           </div>
-          <div className="card-body" style={{ maxHeight: 470, overflowY: 'auto' }}>
+          <div className="card-body" style={{ columnCount: 2, columnGap: 20 }}>
             {grouped.map((g) => (
-              <div key={g.group} style={{ marginBottom: 10 }}>
+              <div key={g.group} style={{ marginBottom: 10, breakInside: 'avoid' }}>
                 <div className="tiny dim" style={{ letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>{g.group}</div>
                 {g.items.map((p) => {
                   const allowed = !!me?.permissions?.includes(p.id);

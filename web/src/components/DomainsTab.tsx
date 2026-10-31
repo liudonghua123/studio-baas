@@ -97,7 +97,7 @@ export default function DomainsTab({ functionId, functionName }: { functionId: s
                         {d.note && d.status !== 'active' && <div className="tiny dim" style={{ marginTop: 4, maxWidth: 240 }}>{d.note}</div>}
                       </td>
                       <td><Badge tone={d.sslStatus === 'issued' ? 'green' : 'amber'}>{d.sslStatus}</Badge></td>
-                      <td className="dim tiny">{timeAgo(d.createdAt)}</td>
+                      <td className="dim tiny" style={{ whiteSpace: 'nowrap' }}>{timeAgo(d.createdAt)}</td>
                       <td>
                         <div className="flex" style={{ gap: 4, justifyContent: 'flex-end' }}>
                           <button className="mini-btn" title="Verify DNS" disabled={!can('functions.write') || busy === d.id}
