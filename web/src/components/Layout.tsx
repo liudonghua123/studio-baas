@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Database, FolderOpen, Boxes, Globe2, Users, Send, Sparkles,
   ScrollText, Settings2, BookOpen, Search, Bell, ChevronDown, HelpCircle, Activity,
+  Layers, Check, Plus,
 } from 'lucide-react';
-import { api } from '../api';
+import { api, currentProjectId, setProject } from '../api';
+import type { Project } from '../types';
 
 const nav = [
   {
@@ -34,23 +36,46 @@ const nav = [
 const titles: Record<string, string> = {
   '': 'Dashboard', databases: 'Databases', storage: 'Storage', functions: 'Functions',
   sites: 'Sites', auth: 'Auth', messaging: 'Messaging', ai: 'AI Assistant',
-  logs: 'Logs', settings: 'Settings', docs: 'Analysis',
+  logs: 'Logs', settings: 'Settings', docs: 'Analysis', projects: 'Projects', members: 'Members',
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
   const nav2 = useNavigate();
-  const [project, setProject] = useState<{ name: string; region: string; plan: string; id: string } | null>(null);
+  const [project, setProjectState] = useState<Project | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [menu, setMenu] = useState(false);
   const [aiMode, setAiMode] = useState<'demo' | 'deepseek'>('demo');
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.project().then((p) => setProject(p as any)).catch(() => {});
+    api.projects().then((r) => {
+      setProjects(r.projects);
+      const current = r.projects.find((p) => p.id === (currentProjectId() || r.currentProjectId));
+      setProjectState(current || r.projects[0] || null);
+      if (!currentProjectId() && r.currentProjectId) setProject(r.currentProjectId);
+    }).catch(() => {});
+    api.project().then((p) => setProjectState(p as any)).catch(() => {});
     api.aiStatus().then((s) => setAiMode(s.mode)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
   const segs = loc.pathname.split('/').filter(Boolean);
   const root = segs[0] || '';
   const title = titles[root] || root;
+
+  const switchProject = (id: string) => {
+    if (id === project?.id) { setMenu(false); return; }
+    setProject(id);
+    window.location.href = '/';
+  };
 
   return (
     <div className="app">
@@ -63,13 +88,42 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="project-pill pointer" onClick={() => nav2('/settings')}>
-          <div className="project-avatar">{(project?.name || 'A').slice(0, 1)}</div>
-          <div className="project-meta">
-            <b>{project?.name || 'Loading…'}</b>
-            <small>{project ? `${project.region.toUpperCase()} · ${project.plan}` : '—'}</small>
+        <div className="proj-wrap" ref={menuRef}>
+          <div className="project-pill pointer" onClick={() => setMenu((v) => !v)}>
+            <div className="project-avatar" style={{ background: project?.color || undefined }}>
+              {(project?.name || 'A').slice(0, 1)}
+            </div>
+            <div className="project-meta">
+              <b>{project?.name || 'Loading…'}</b>
+              <small>{project ? `${project.region.toUpperCase()} · ${project.plan}` : '—'}</small>
+            </div>
+            <ChevronDown size={13} style={{ transform: menu ? 'rotate(180deg)' : undefined, transition: 'transform .15s' }} />
           </div>
-          <ChevronDown size={13} />
+
+          {menu && (
+            <div className="proj-menu">
+              <div className="proj-menu-label">Switch project</div>
+              {projects.map((p) => (
+                <button key={p.id} className="proj-item" onClick={() => switchProject(p.id)}>
+                  <span className="proj-dot" style={{ background: p.color }} />
+                  <span className="proj-item-text">
+                    <b>{p.name}</b>
+                    <small>{p.stats ? `${p.stats.collections} collections · ${p.stats.functions} functions` : p.key}</small>
+                  </span>
+                  {p.id === project?.id && <Check size={13} color="#fd366e" />}
+                </button>
+              ))}
+              <div className="proj-menu-sep" />
+              <button className="proj-item" onClick={() => { setMenu(false); nav2('/projects'); }}>
+                <Layers size={13} />
+                <span className="proj-item-text"><b>All projects</b><small>Create, rename, delete</small></span>
+              </button>
+              <button className="proj-item" onClick={() => { setMenu(false); nav2('/projects?new=1'); }}>
+                <Plus size={13} />
+                <span className="proj-item-text"><b>New project</b><small>Isolated resources</small></span>
+              </button>
+            </div>
+          )}
         </div>
 
         {nav.map((g) => (
@@ -86,6 +140,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         <div className="nav-group">
           <div className="nav-label">Project</div>
+          <NavLink to="/projects" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            <Layers /><span>Projects</span>
+          </NavLink>
           <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Settings2 /><span>Settings</span>
           </NavLink>

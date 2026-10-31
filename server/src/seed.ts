@@ -30,8 +30,10 @@ export function seed() {
   const project = db.prepare('SELECT * FROM projects LIMIT 1').get() as any;
   if (project) return false;
 
-  db.prepare('INSERT INTO projects (id,name,region,plan,createdAt) VALUES (?,?,?,?,?)').run(
-    'studio', 'Aurora Commerce', 'fra', 'pro', now(),
+  db.prepare(`INSERT INTO projects (id,name,key,region,plan,status,color,description,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+    'studio', 'Aurora Commerce', 'aurora-commerce', 'fra', 'pro', 'active', '#fd366e',
+    'Storefront, catalog and checkout services for the Aurora retail brand.', now(), now(),
   );
   db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('ai_model', 'deepseek-chat');
 
@@ -555,4 +557,100 @@ products.forEach(function (p) {
     { path: 'styles.css', content: css },
     { path: 'app.js', content: js },
   ];
+}
+
+/* ------------------------------------------------- 第二个项目（多项目演示） */
+
+/**
+ * 演示"项目隔离"：Nebula Analytics 拥有自己的集合、函数、站点与桶，
+ * 与 Aurora Commerce 的数据互不可见。老库也能安全补种（幂等）。
+ */
+export function seedDemoProject() {
+  // 老库补全展示字段（幂等）
+  db.prepare(`UPDATE projects SET description=? WHERE id='studio' AND (description IS NULL OR description='')`).run(
+    'Storefront, catalog and checkout services for the Aurora retail brand.',
+  );
+  if (db.prepare('SELECT 1 FROM projects WHERE id=?').get('prj_nebula')) return false;
+  const t = now();
+  db.prepare(`INSERT INTO projects (id,name,key,region,plan,status,color,description,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+    'prj_nebula', 'Nebula Analytics', 'nebula-analytics', 'ams', 'pro', 'active', '#6C5CE7',
+    'Event pipeline and internal dashboards for the Nebula product team.', t, t,
+  );
+
+  const insCol = db.prepare(`INSERT INTO collections (id,name,key,icon,color,documentSecurity,enabled,createdAt,updatedAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  insCol.run('col_neb_events', 'Events', 'events', 'activity', '#6C5CE7', 0, 1, t, t, 'prj_nebula');
+  insCol.run('col_neb_dashboards', 'Dashboards', 'dashboards', 'layout-dashboard', '#00B894', 0, 1, t, t, 'prj_nebula');
+
+  const insAttr = db.prepare(`INSERT INTO attributes (id,collectionId,key,type,required,array,size,defaultVal,elements,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`);
+  insAttr.run(uid('attr_'), 'col_neb_events', 'name', 'string', 1, 0, 64, null, '[]', t);
+  insAttr.run(uid('attr_'), 'col_neb_events', 'source', 'enum', 1, 0, null, null, JSON.stringify(['web', 'ios', 'android', 'api']), t);
+  insAttr.run(uid('attr_'), 'col_neb_events', 'count', 'integer', 1, 0, null, null, '[]', t);
+  insAttr.run(uid('attr_'), 'col_neb_dashboards', 'title', 'string', 1, 0, 96, null, '[]', t);
+  insAttr.run(uid('attr_'), 'col_neb_dashboards', 'public', 'boolean', 0, 0, null, null, '[]', t);
+
+  const insDoc = db.prepare('INSERT INTO documents (id,collectionId,data,permissions,createdAt,updatedAt) VALUES (?,?,?,?,?,?)');
+  const perms = JSON.stringify(['read("any")']);
+  for (const [name, source, count] of [
+    ['dashboard_view', 'web', 1284], ['checkout_start', 'web', 312], ['app_open', 'ios', 903],
+    ['app_open', 'android', 771], ['api_sync', 'api', 96],
+  ] as const) {
+    insDoc.run(uid('doc_'), 'col_neb_events', JSON.stringify({ name, source, count }), perms, t, t);
+  }
+  for (const [title, isPublic] of [['Weekly active users', 1], ['Funnel — checkout', 1], ['Revenue by plan', 0]] as const) {
+    insDoc.run(uid('doc_'), 'col_neb_dashboards', JSON.stringify({ title, public: !!isPublic }), perms, t, t);
+  }
+
+  db.prepare(`INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    'bkt_nebula', 'exports', 8 * 1024 * 1024, JSON.stringify(['csv', 'json', 'png']), 'gzip', 0, 0, t, 'prj_nebula',
+  );
+
+  const rollupCode = `export default async ({ req, res, log, databases }) => {
+  const events = databases.listDocuments('events', { limit: 100 });
+  const total = events.documents.reduce((s, d) => s + Number(d.data.count || 0), 0);
+  log('rollup over', events.total, 'events, total count', total);
+  return res.json({ ok: true, events: events.total, total, window: '24h' });
+};`;
+  db.prepare(`INSERT INTO functions (id,name,runtime,entrypoint,code,schedule,timeout,env,enabled,executeAccess,createdAt,updatedAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'fn_neb_rollup', 'Nightly rollup', 'node-22', 'src/main.js', rollupCode, '0 2 * * *', 20,
+    JSON.stringify({ WINDOW: '24h' }), 1, 'any', t, t, 'prj_nebula',
+  );
+
+  const siteFiles = [
+    { path: 'index.html', content: `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" /><title>Nebula Docs</title>
+<link rel="stylesheet" href="./styles.css" /></head><body>
+<header><span class="dot"></span><b>Nebula</b><nav><a href="#events">Events API</a><a href="#sdks">SDKs</a></nav></header>
+<main><p class="eyebrow">DOCUMENTATION</p><h1>Ship analytics<br /><em>in an afternoon.</em></h1>
+<p class="lede">Nebula collects product events, rolls them up hourly and exposes them through a typed query API.</p>
+<pre><code>curl -X POST https://api.nebula.dev/v1/events \\
+  -H "x-api-key: $NEBULA_KEY" \\
+  -d '{"name":"app_open","source":"ios"}'</code></pre>
+<h2 id="events">Events API</h2><table><tr><th>Field</th><th>Type</th></tr><tr><td>name</td><td>string</td></tr><tr><td>source</td><td>web | ios | android | api</td></tr><tr><td>count</td><td>integer</td></tr></table>
+</main></body></html>` },
+    { path: 'styles.css', content: `:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#0a0a10;color:#e9e9f2;font:15px/1.7 ui-sans-serif,system-ui}
+header{display:flex;align-items:center;gap:10px;padding:18px 40px;border-bottom:1px solid #1e1e2a}
+.dot{width:9px;height:9px;border-radius:50%;background:#6C5CE7;box-shadow:0 0 12px #6C5CE7}
+nav{margin-left:auto;display:flex;gap:18px}nav a{color:#8f8fa8;text-decoration:none;font-size:13px}
+main{max-width:760px;margin:0 auto;padding:64px 24px 96px}
+.eyebrow{letter-spacing:.22em;font-size:11px;color:#6C5CE7}
+h1{font-size:48px;line-height:1.08;letter-spacing:-.03em;margin:8px 0 18px}h1 em{font-family:Georgia,serif;color:#a99bff}
+.lede{color:#9b9bb4;max-width:52ch}
+pre{background:#12121c;border:1px solid #1e1e2a;border-radius:10px;padding:16px;overflow:auto}
+code{font:12.5px/1.6 ui-monospace,monospace;color:#c8c2ff}
+h2{margin-top:44px;font-size:22px}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{border-bottom:1px solid #1e1e2a;padding:8px 10px;text-align:left}th{color:#8f8fa8;font-weight:500}` },
+  ];
+  db.prepare(`INSERT INTO sites (id,name,framework,domain,entrypoint,buildCommand,files,status,buildLogs,createdAt,updatedAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'site_neb_docs', 'nebula-docs', 'static', 'docs.nebula.dev', 'index.html', 'npm run build',
+    JSON.stringify(siteFiles), 'ready', JSON.stringify(['✓ Build started', '✓ 2 files processed', '✓ Deployed to edge']), t, t, 'prj_nebula',
+  );
+
+  return true;
 }

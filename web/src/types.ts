@@ -1,3 +1,9 @@
+export interface Project {
+  id: string; name: string; key: string; region: string; plan: string; status: string;
+  color: string; description: string; createdAt: string; updatedAt: string;
+  stats?: { collections: number; functions: number; sites: number; members: number };
+}
+
 export interface Collection {
   id: string; name: string; key: string; icon: string; color: string;
   documentSecurity: boolean; enabled: boolean; createdAt: string; updatedAt: string;

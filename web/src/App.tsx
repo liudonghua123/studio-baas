@@ -14,6 +14,7 @@ import Logs from './pages/Logs';
 import Settings from './pages/Settings';
 import Docs from './pages/Docs';
 import AI from './pages/AI';
+import Projects from './pages/Projects';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/auth" element={<Auth />} />
             <Route path="/messaging" element={<Messaging />} />
             <Route path="/logs" element={<Logs />} />
+            <Route path="/projects" element={<Projects />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/docs" element={<Docs />} />
             <Route path="/ai" element={<AI />} />

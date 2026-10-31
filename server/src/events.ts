@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
 
 export type StudioEvent = {
-  type: 'collection' | 'document' | 'file' | 'function' | 'execution' | 'site' | 'user' | 'message' | 'ai' | 'log';
+  type:
+    | 'collection' | 'document' | 'file' | 'function' | 'execution' | 'site'
+    | 'user' | 'message' | 'ai' | 'log'
+    | 'project' | 'member' | 'domain' | 'schedule' | 'git';
   action: string;
   resource?: string;
   detail?: string;

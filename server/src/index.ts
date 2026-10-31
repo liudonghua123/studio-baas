@@ -5,10 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate, db, now } from './db.js';
-import { seed } from './seed.js';
+import { seed, seedDemoProject } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
+import * as projects from './projects.js';
 import { chat, getAiConfig, tools } from './ai.js';
+import { runWithContext, currentProjectId, DEFAULT_PROJECT_ID } from './context.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
@@ -17,12 +19,22 @@ const DOCS_DIR = path.join(ROOT, 'docs');
 
 migrate();
 const seeded = seed();
+seedDemoProject();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '12mb' }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
+
+/* ------------------------------------------------------- project context */
+// 所有 /v1 请求都绑定到一个项目：显式 X-Project-Id 优先，否则用默认项目。
+// 下游 store 层通过 AsyncLocalStorage 读取，避免层层透传 projectId。
+app.use((req, _res, next) => {
+  const requested = String(req.header('x-project-id') || req.query.projectId || '');
+  const project = requested ? projects.getProject(requested) : projects.defaultProject();
+  runWithContext({ projectId: project?.id || DEFAULT_PROJECT_ID, principal: null }, () => next());
+});
 
 const wrap = (fn: (req: express.Request, res: express.Response) => Promise<any> | any) =>
   (req: express.Request, res: express.Response) => {
@@ -57,9 +69,33 @@ const mapService = (s: string) => (s === 'databases' ? 'databases' : s);
 app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.6.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', (_req, res) => {
-  const p = db.prepare('SELECT * FROM projects LIMIT 1').get();
-  res.json({ ...(p as any), seeded, services: store.getMetrics().services });
+  const p = projects.getProject(currentProjectId()) || projects.defaultProject();
+  res.json({ ...p, seeded, services: store.getMetrics().services });
 });
+
+/* --------------------------------------------------------------- projects */
+app.get('/v1/projects', (_req, res) => {
+  const list = projects.listProjects();
+  res.json({ total: list.length, projects: list, currentProjectId: currentProjectId() });
+});
+
+app.post('/v1/projects', wrap((req, res) => res.status(201).json(projects.createProject(req.body || {}))));
+
+app.get('/v1/projects/:id', wrap((req, res) => {
+  const p = projects.getProject(req.params.id);
+  if (!p) return fail(res, new Error('Project not found'), 404);
+  res.json(p);
+}));
+
+app.patch('/v1/projects/:id', wrap((req, res) => {
+  const p = projects.updateProject(req.params.id, req.body || {});
+  if (!p) return fail(res, new Error('Project not found'), 404);
+  res.json(p);
+}));
+
+app.delete('/v1/projects/:id', wrap((req, res) => {
+  res.json({ ok: projects.deleteProject(req.params.id) });
+}));
 
 app.get('/v1/metrics', (_req, res) => res.json(store.getMetrics()));
 

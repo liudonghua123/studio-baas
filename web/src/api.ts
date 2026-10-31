@@ -1,12 +1,31 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, LogEntry, Message, Metrics, Site, User,
+  FileItem, FunctionDef, LogEntry, Message, Metrics, Project, Site, User,
 } from './types';
+
+export const PROJECT_KEY = 'studio.project';
+export const currentProjectId = () => localStorage.getItem(PROJECT_KEY) || '';
+
+/** 每个请求都带上项目与身份，服务端据此做隔离与 RBAC 判定 */
+function baseHeaders(): Record<string, string> {
+  const h: Record<string, string> = {};
+  const pid = currentProjectId();
+  if (pid) h['x-project-id'] = pid;
+  const token = localStorage.getItem('studio.session') || '';
+  if (token) h['x-studio-session'] = token;
+  const role = localStorage.getItem('studio.actAs') || '';
+  if (role) h['x-studio-act-as'] = role;
+  return h;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: init?.body instanceof FormData ? init.headers : { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    headers: {
+      ...baseHeaders(),
+      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(init?.headers || {}),
+    },
   });
   const text = await res.text();
   let data: any = null;
@@ -22,6 +41,10 @@ const del = <T>(p: string) => request<T>(p, { method: 'DELETE' });
 
 export const api = {
   metrics: () => get<Metrics>('/v1/metrics'),
+  projects: () => get<{ projects: Project[]; currentProjectId: string }>('/v1/projects'),
+  createProject: (body: any) => post<Project>('/v1/projects', body),
+  updateProject: (id: string, body: any) => patch<Project>(`/v1/projects/${id}`, body),
+  deleteProject: (id: string) => del(`/v1/projects/${id}`),
   project: () => get<{ id: string; name: string; region: string; plan: string }>('/v1/project'),
 
   collections: () => get<{ collections: Collection[] }>('/v1/databases/collections'),
@@ -92,3 +115,8 @@ export const api = {
 
 export const fileUrl = (id: string) => `/v1/storage/files/${id}/view`;
 export const previewUrl = (siteId: string) => `/v1/sites/${siteId}/preview/${'index.html'}?t=${Date.now()}`;
+
+export function setProject(id: string) {
+  if (id) localStorage.setItem(PROJECT_KEY, id);
+  else localStorage.removeItem(PROJECT_KEY);
+}

@@ -4,6 +4,10 @@ import crypto from 'node:crypto';
 import { db, now, uid, UPLOAD_DIR } from './db.js';
 import { bus } from './events.js';
 import { executeFunctionCode, type ExecContext } from './runtime.js';
+import { currentProjectId } from './context.js';
+
+/** 当前请求所属项目；store 层所有查询据此隔离 */
+const pid = () => currentProjectId();
 
 /* ------------------------------------------------------------------ types */
 
@@ -35,7 +39,7 @@ const safeJson = <T,>(s: string | null | undefined, fallback: T): T => {
 /* ------------------------------------------------------------- collections */
 
 export function listCollections(withStats = true): Collection[] {
-  const rows = db.prepare('SELECT * FROM collections ORDER BY createdAt ASC').all() as any[];
+  const rows = db.prepare('SELECT * FROM collections WHERE projectId=? ORDER BY createdAt ASC').all(pid()) as any[];
   return rows.map((r) => {
     const c: Collection = {
       id: r.id, name: r.name, key: r.key, icon: r.icon || 'database', color: r.color || '#6C5CE7',
@@ -51,7 +55,7 @@ export function listCollections(withStats = true): Collection[] {
 }
 
 export function getCollection(idOrKey: string): Collection | null {
-  const r = db.prepare('SELECT * FROM collections WHERE id=? OR key=?').get(idOrKey, idOrKey) as any;
+  const r = db.prepare('SELECT * FROM collections WHERE (id=? OR key=?) AND projectId=?').get(idOrKey, idOrKey, pid()) as any;
   if (!r) return null;
   return {
     id: r.id, name: r.name, key: r.key, icon: r.icon, color: r.color,
@@ -75,15 +79,15 @@ export function createCollection(input: {
   name: string; key?: string; icon?: string; color?: string; documentSecurity?: boolean;
 }): Collection {
   const key = (input.key || input.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || `collection_${Date.now()}`;
-  if (db.prepare('SELECT 1 FROM collections WHERE key=?').get(key)) {
+  if (db.prepare('SELECT 1 FROM collections WHERE key=? AND projectId=?').get(key, pid())) {
     throw new Error(`Collection key "${key}" already exists`);
   }
   const id = uid('col_');
   const t = now();
-  db.prepare(`INSERT INTO collections (id,name,key,icon,color,documentSecurity,enabled,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO collections (id,name,key,icon,color,documentSecurity,enabled,createdAt,updatedAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     id, input.name, key, input.icon || 'database', input.color || '#6C5CE7',
-    input.documentSecurity ? 1 : 0, 1, t, t,
+    input.documentSecurity ? 1 : 0, 1, t, t, pid(),
   );
   bus.publish({ type: 'collection', action: 'create', resource: input.name });
   return getCollection(id)!;
@@ -267,7 +271,7 @@ export function deleteDocument(collectionId: string, docId: string): boolean {
 /* ------------------------------------------------------------------- files */
 
 export function listBuckets() {
-  const rows = db.prepare('SELECT * FROM buckets ORDER BY createdAt ASC').all() as any[];
+  const rows = db.prepare('SELECT * FROM buckets WHERE projectId=? ORDER BY createdAt ASC').all(pid()) as any[];
   return rows.map((r) => ({
     id: r.id, name: r.name, maxFileSize: r.maxFileSize,
     allowedExtensions: safeJson<string[]>(r.allowedExtensions, []),
@@ -280,11 +284,11 @@ export function listBuckets() {
 
 export function createBucket(input: { name: string; maxFileSize?: number; allowedExtensions?: string[]; compression?: string; encryption?: boolean; imageTransform?: boolean }) {
   const id = uid('bkt_');
-  db.prepare(`INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt)
-    VALUES (?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
     id, input.name, input.maxFileSize ?? 5 * 1024 * 1024,
     JSON.stringify(input.allowedExtensions ?? []), input.compression ?? 'none',
-    input.encryption ? 1 : 0, input.imageTransform ? 1 : 0, now(),
+    input.encryption ? 1 : 0, input.imageTransform ? 1 : 0, now(), pid(),
   );
   bus.publish({ type: 'file', action: 'bucket.create', resource: input.name });
   return listBuckets().find((b) => b.id === id)!;
@@ -349,7 +353,7 @@ const funcFromRow = (r: any) => ({
 });
 
 export function listFunctions() {
-  const rows = db.prepare('SELECT * FROM functions ORDER BY createdAt ASC').all() as any[];
+  const rows = db.prepare('SELECT * FROM functions WHERE projectId=? ORDER BY createdAt ASC').all(pid()) as any[];
   return rows.map((r) => ({
     ...funcFromRow(r),
     executions: (db.prepare('SELECT COUNT(*) c FROM executions WHERE functionId=?').get(r.id) as any).c,
@@ -365,11 +369,11 @@ export function getFunction(id: string) {
 export function createFunction(input: { name: string; runtime?: string; code?: string; entrypoint?: string; timeout?: number; env?: Record<string, string>; schedule?: string }) {
   const id = uid('fn_');
   const t = now();
-  db.prepare(`INSERT INTO functions (id,name,runtime,entrypoint,code,schedule,timeout,env,enabled,executeAccess,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO functions (id,name,runtime,entrypoint,code,schedule,timeout,env,enabled,executeAccess,createdAt,updatedAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     id, input.name, input.runtime || 'node-22', input.entrypoint || 'src/main.js',
     input.code || DEFAULT_FUNCTION_CODE, input.schedule || '', input.timeout ?? 15,
-    JSON.stringify(input.env || {}), 1, 'any', t, t,
+    JSON.stringify(input.env || {}), 1, 'any', t, t, pid(),
   );
   bus.publish({ type: 'function', action: 'create', resource: input.name });
   return getFunction(id)!;
@@ -398,8 +402,8 @@ export function deleteFunction(id: string) {
 
 export function listExecutions(functionId?: string, limit = 30) {
   const rows = functionId
-    ? db.prepare('SELECT * FROM executions WHERE functionId=? ORDER BY createdAt DESC LIMIT ?').all(functionId, limit)
-    : db.prepare('SELECT * FROM executions ORDER BY createdAt DESC LIMIT ?').all(limit);
+    ? db.prepare('SELECT * FROM executions WHERE functionId=? AND projectId=? ORDER BY createdAt DESC LIMIT ?').all(functionId, pid(), limit)
+    : db.prepare('SELECT * FROM executions WHERE projectId=? ORDER BY createdAt DESC LIMIT ?').all(pid(), limit);
   return (rows as any[]).map((r) => ({
     id: r.id, functionId: r.functionId, status: r.status, triggerType: r.triggerType,
     duration: r.duration, logs: safeJson<string[]>(r.logs, []),
@@ -445,7 +449,7 @@ export async function executeFunction(id: string, payload: any, triggerType = 'm
     },
     storage: { listFiles, listBuckets },
     users: { list: () => listUsers() },
-    meta: { functionId: id, functionName: fn.name, projectId: 'studio' },
+    meta: { functionId: id, functionName: fn.name, projectId: pid() },
   } satisfies ExecContext;
 
   let status: 'completed' | 'failed' = 'completed';
@@ -458,10 +462,10 @@ export async function executeFunction(id: string, payload: any, triggerType = 'm
   }
   const duration = Date.now() - started;
   const execId = uid('exec_');
-  db.prepare(`INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     execId, id, status, triggerType, duration, JSON.stringify(logs),
-    JSON.stringify(res.body), JSON.stringify(errors), now(),
+    JSON.stringify(res.body), JSON.stringify(errors), now(), pid(),
   );
   addLog({ method: 'POST', path: `/v1/functions/${fn.name}/executions`, status: status === 'completed' ? 200 : 500, duration, service: 'functions' });
   bus.publish({ type: 'execution', action: status, resource: fn.name });
@@ -487,7 +491,7 @@ const siteFromRow = (r: any) => ({
 });
 
 export function listSites() {
-  return (db.prepare('SELECT * FROM sites ORDER BY createdAt ASC').all() as any[]).map((r) => {
+  return (db.prepare('SELECT * FROM sites WHERE projectId=? ORDER BY createdAt ASC').all(pid()) as any[]).map((r) => {
     const s = siteFromRow(r);
     return { ...s, fileCount: s.files.length };
   });
@@ -502,11 +506,11 @@ export function createSite(input: { name: string; framework?: string; files?: { 
   const id = uid('site_');
   const t = now();
   const files = input.files?.length ? input.files : [{ path: 'index.html', content: EMPTY_SITE_CODE }];
-  db.prepare(`INSERT INTO sites (id,name,framework,domain,entrypoint,buildCommand,files,status,buildLogs,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO sites (id,name,framework,domain,entrypoint,buildCommand,files,status,buildLogs,createdAt,updatedAt,projectId)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     id, input.name, input.framework || 'static', input.domain || `${input.name.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}.studio.app`,
     input.entrypoint || 'index.html', 'npm run build', JSON.stringify(files), 'ready',
-    JSON.stringify(['✓ Build started', '✓ 3 files processed', '✓ Deployed to edge']), t, t,
+    JSON.stringify(['✓ Build started', '✓ 3 files processed', '✓ Deployed to edge']), t, t, pid(),
   );
   bus.publish({ type: 'site', action: 'create', resource: input.name });
   return getSite(id)!;
@@ -621,8 +625,8 @@ export function login(email: string, password: string) {
 
 export function sendMessage(input: { channel: string; recipient: string; subject?: string; body: string }) {
   const id = uid('msg_');
-  db.prepare('INSERT INTO messages (id,channel,recipient,subject,body,status,createdAt) VALUES (?,?,?,?,?,?,?)').run(
-    id, input.channel, input.recipient, input.subject || '', input.body, 'sent', now(),
+  db.prepare('INSERT INTO messages (id,channel,recipient,subject,body,status,createdAt,projectId) VALUES (?,?,?,?,?,?,?,?)').run(
+    id, input.channel, input.recipient, input.subject || '', input.body, 'sent', now(), pid(),
   );
   addLog({ method: 'POST', path: '/v1/messaging/messages', status: 201, duration: 87, service: 'messaging' });
   bus.publish({ type: 'message', action: 'send', resource: input.recipient });
@@ -630,13 +634,13 @@ export function sendMessage(input: { channel: string; recipient: string; subject
 }
 
 export function listMessages(limit = 50) {
-  return db.prepare('SELECT * FROM messages ORDER BY createdAt DESC LIMIT ?').all(limit);
+  return db.prepare('SELECT * FROM messages WHERE projectId=? ORDER BY createdAt DESC LIMIT ?').all(pid(), limit);
 }
 
 /* ---------------------------------------------------------------- api keys */
 
 export function listApiKeys() {
-  return (db.prepare('SELECT * FROM apiKeys ORDER BY createdAt DESC').all() as any[]).map((r) => ({
+  return (db.prepare('SELECT * FROM apiKeys WHERE projectId=? ORDER BY createdAt DESC').all(pid()) as any[]).map((r) => ({
     id: r.id, name: r.name, scopes: safeJson<string[]>(r.scopes, []),
     secret: r.secret, lastUsedAt: r.lastUsedAt, createdAt: r.createdAt,
   }));
@@ -645,8 +649,8 @@ export function listApiKeys() {
 export function createApiKey(name: string, scopes: string[]) {
   const id = uid('key_');
   const secret = 'standard_' + crypto.randomBytes(24).toString('hex');
-  db.prepare('INSERT INTO apiKeys (id,name,scopes,secret,lastUsedAt,createdAt) VALUES (?,?,?,?,?,?)').run(
-    id, name, JSON.stringify(scopes), secret, null, now(),
+  db.prepare('INSERT INTO apiKeys (id,name,scopes,secret,lastUsedAt,createdAt,projectId) VALUES (?,?,?,?,?,?,?)').run(
+    id, name, JSON.stringify(scopes), secret, null, now(), pid(),
   );
   return listApiKeys().find((k) => k.id === id)!;
 }
@@ -658,48 +662,56 @@ export function deleteApiKey(id: string) {
 /* ------------------------------------------------------------------- logs */
 
 export function addLog(input: { method: string; path: string; status: number; duration: number; service: string; ip?: string }) {
-  db.prepare('INSERT INTO logs (id,method,path,status,duration,service,ip,createdAt) VALUES (?,?,?,?,?,?,?,?)').run(
+  db.prepare('INSERT INTO logs (id,method,path,status,duration,service,ip,createdAt,projectId) VALUES (?,?,?,?,?,?,?,?,?)').run(
     uid('log_'), input.method, input.path, input.status, input.duration,
-    input.service, input.ip || '127.0.0.1', now(),
+    input.service, input.ip || '127.0.0.1', now(), pid(),
   );
 }
 
 export function listLogs(limit = 60) {
-  return db.prepare('SELECT * FROM logs ORDER BY createdAt DESC LIMIT ?').all(limit);
+  return db.prepare('SELECT * FROM logs WHERE projectId=? ORDER BY createdAt DESC LIMIT ?').all(pid(), limit);
 }
 
 /* ---------------------------------------------------------------- metrics */
 
 export function getMetrics() {
-  const docCount = (db.prepare('SELECT COUNT(*) c FROM documents').get() as any).c;
-  const fileAgg = db.prepare('SELECT COUNT(*) c, COALESCE(SUM(size),0) s FROM files').get() as any;
-  const execs24 = (db.prepare("SELECT COUNT(*) c FROM executions WHERE createdAt > datetime('now','-1 day')").get() as any).c;
-  const failed = (db.prepare("SELECT COUNT(*) c FROM executions WHERE status='failed'").get() as any).c;
-  const requests24 = (db.prepare("SELECT COUNT(*) c FROM logs WHERE createdAt > datetime('now','-1 day')").get() as any).c;
+  const projectId = pid();
+  const docCount = (db.prepare(
+    'SELECT COUNT(*) c FROM documents d JOIN collections c2 ON c2.id=d.collectionId WHERE c2.projectId=?',
+  ).get(projectId) as any).c;
+  const fileAgg = db.prepare(
+    'SELECT COUNT(*) c, COALESCE(SUM(f.size),0) s FROM files f JOIN buckets b ON b.id=f.bucketId WHERE b.projectId=?',
+  ).get(projectId) as any;
+  const execs24 = (db.prepare("SELECT COUNT(*) c FROM executions WHERE projectId=? AND createdAt > datetime('now','-1 day')").get(projectId) as any).c;
+  const failed = (db.prepare("SELECT COUNT(*) c FROM executions WHERE projectId=? AND status='failed'").get(projectId) as any).c;
+  const requests24 = (db.prepare("SELECT COUNT(*) c FROM logs WHERE projectId=? AND createdAt > datetime('now','-1 day')").get(projectId) as any).c;
 
   const trend: { date: string; requests: number; errors: number }[] = [];
   for (let i = 13; i >= 0; i--) {
     const d = new Date(Date.now() - i * 864e5);
     const key = d.toISOString().slice(0, 10);
-    const r = db.prepare("SELECT COUNT(*) c, SUM(CASE WHEN status>=400 THEN 1 ELSE 0 END) e FROM logs WHERE substr(createdAt,1,10)=?").get(key) as any;
+    const r = db.prepare(
+      "SELECT COUNT(*) c, SUM(CASE WHEN status>=400 THEN 1 ELSE 0 END) e FROM logs WHERE projectId=? AND substr(createdAt,1,10)=?",
+    ).get(projectId, key) as any;
     trend.push({ date: key, requests: r.c || 0, errors: r.e || 0 });
   }
 
   const topCollections = (db.prepare(
-    `SELECT c.name, c.key, c.color, COUNT(d.id) n FROM collections c LEFT JOIN documents d ON d.collectionId=c.id GROUP BY c.id ORDER BY n DESC`,
-  ).all() as any[]).map((r) => ({ name: r.name, key: r.key, color: r.color, documents: r.n }));
+    `SELECT c.name, c.key, c.color, COUNT(d.id) n FROM collections c LEFT JOIN documents d ON d.collectionId=c.id
+     WHERE c.projectId=? GROUP BY c.id ORDER BY n DESC`,
+  ).all(projectId) as any[]).map((r) => ({ name: r.name, key: r.key, color: r.color, documents: r.n }));
 
   return {
     documents: docCount,
     files: fileAgg.c,
     storageBytes: fileAgg.s,
-    functions: (db.prepare('SELECT COUNT(*) c FROM functions').get() as any).c,
+    functions: (db.prepare('SELECT COUNT(*) c FROM functions WHERE projectId=?').get(projectId) as any).c,
     executions24h: execs24,
     failedExecutions: failed,
     users: (db.prepare('SELECT COUNT(*) c FROM users').get() as any).c,
-    sites: (db.prepare('SELECT COUNT(*) c FROM sites').get() as any).c,
-    collections: (db.prepare('SELECT COUNT(*) c FROM collections').get() as any).c,
-    messages: (db.prepare('SELECT COUNT(*) c FROM messages').get() as any).c,
+    sites: (db.prepare('SELECT COUNT(*) c FROM sites WHERE projectId=?').get(projectId) as any).c,
+    collections: (db.prepare('SELECT COUNT(*) c FROM collections WHERE projectId=?').get(projectId) as any).c,
+    messages: (db.prepare('SELECT COUNT(*) c FROM messages WHERE projectId=?').get(projectId) as any).c,
     requests24h: requests24,
     trend,
     topCollections,
@@ -713,7 +725,7 @@ export function getMetrics() {
     ],
     recentExecutions: listExecutions(undefined, 6),
     recentLogs: listLogs(8),
-    project: db.prepare('SELECT * FROM projects LIMIT 1').get(),
+    project: db.prepare('SELECT * FROM projects WHERE id=?').get(projectId) || db.prepare('SELECT * FROM projects LIMIT 1').get(),
   };
 }
 

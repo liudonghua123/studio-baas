@@ -11,6 +11,14 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 export const db = new Database(path.join(DATA_DIR, 'studio.db'));
 db.pragma('journal_mode = WAL');
 
+/** SQLite 没有 `ADD COLUMN IF NOT EXISTS`，用 PRAGMA 自行判断 */
+function hasColumn(table: string, column: string) {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).some((c) => c.name === column);
+}
+function addColumn(table: string, column: string, ddl: string) {
+  if (!hasColumn(table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+
 export function migrate() {
   db.exec(`
   CREATE TABLE IF NOT EXISTS projects (
@@ -85,8 +93,26 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
   `);
+
+  /* ------------------------------------------- project scoping columns */
+  // 升级已有库：所有资源挂到 projectId 上，历史数据归入第一个项目
+  addColumn('projects', 'key', 'TEXT');
+  addColumn('projects', 'status', "TEXT DEFAULT 'active'");
+  addColumn('projects', 'color', "TEXT DEFAULT '#fd366e'");
+  addColumn('projects', 'description', 'TEXT');
+  addColumn('projects', 'updatedAt', 'TEXT');
+  addColumn('projects', 'ownerId', 'TEXT');
+
+  for (const t of ['collections', 'buckets', 'functions', 'sites', 'messages', 'apiKeys', 'logs', 'executions']) {
+    addColumn(t, 'projectId', "TEXT DEFAULT 'studio'");
+    db.exec(`UPDATE ${t} SET projectId='studio' WHERE projectId IS NULL OR projectId=''`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_project ON ${t}(projectId)`);
+  }
+  db.exec(`UPDATE projects SET key=lower(replace(name,' ','-')) WHERE key IS NULL OR key=''`);
+  db.exec(`UPDATE projects SET status='active' WHERE status IS NULL`);
+  db.exec(`UPDATE projects SET updatedAt=createdAt WHERE updatedAt IS NULL`);
 }
 
 export const now = () => new Date().toISOString();
-export const uid = (prefix = '') =>
+export const uid = (prefix: string) =>
   prefix + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
