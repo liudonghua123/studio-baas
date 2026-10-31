@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, now, uid, UPLOAD_DIR } from './db.js';
 import { nextRun } from './cron.js';
+import { hashApiKey, newApiKeySecret, previewApiKey } from './apikey.js';
 
 /* --------------------------------------------------------------- helpers */
 
@@ -44,10 +45,12 @@ export function seed() {
     { id: 'col_orders', name: 'Orders', key: 'orders', icon: 'shopping-bag', color: '#FD366E' },
     { id: 'col_customers', name: 'Customers', key: 'customers', icon: 'users', color: '#00B894' },
     { id: 'col_posts', name: 'Posts', key: 'posts', icon: 'file-text', color: '#0984E3' },
+    // 唯一开启文档级权限的集合：用来看“同一个项目里，不同角色看到不同行”
+    { id: 'col_notes', name: 'Notes', key: 'notes', icon: 'file-text', color: '#00B894', security: 1 },
   ];
   for (const c of cols) {
     db.prepare('INSERT INTO collections (id,name,key,icon,color,documentSecurity,enabled,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(c.id, c.name, c.key, c.icon, c.color, 0, 1, now(), now());
+      .run(c.id, c.name, c.key, c.icon, c.color, (c as any).security ?? 0, 1, now(), now());
   }
 
   const attr = (col: string, key: string, type: string, required = 0, extra: Partial<{ size: number; elements: string[]; array: boolean }> = {}) => {
@@ -85,6 +88,10 @@ export function seed() {
   attr('col_posts', 'status', 'enum', 1, { elements: ['published', 'draft'] });
   attr('col_posts', 'views', 'integer');
   attr('col_posts', 'excerpt', 'text');
+
+  attr('col_notes', 'title', 'string', 1);
+  attr('col_notes', 'visibility', 'enum', 1, { elements: ['public', 'owners'] });
+  attr('col_notes', 'body', 'text');
 
   /* -------------------------------------------------------------- buckets */
   db.prepare('INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt) VALUES (?,?,?,?,?,?,?,?)')
@@ -180,6 +187,21 @@ export function seed() {
       title: p[0], slug: p[1], author: p[2], status: p[3], views: p[4],
       excerpt: 'Notes from the studio on building products that feel quiet, useful and enduring.',
     }), JSON.stringify(['read("any")', 'update("users")', 'delete("users")']), t, t);
+  });
+
+  /* -------------------------------------------------- documents (secured) */
+  // 演示文档级权限：public 任何人可读，owners 只有 owner 角色可读/写
+  const notes: [string, 'public' | 'owners', string][] = [
+    ['Release notes · v1.7', 'public', 'Function execution is now isolated in a worker thread, so a runaway loop can no longer freeze the console.'],
+    ['Studio retro · Q4', 'owners', 'Internal retro notes. Only the owner role can read this document — the API returns 404 for everyone else.'],
+    ['Launch checklist', 'public', 'Domains verified, schedules armed, GitHub webhook signed and delivered.'],
+  ];
+  const perms = (v: string) => v === 'owners'
+    ? JSON.stringify(['read("team:studio/owner")', 'update("team:studio/owner")', 'delete("team:studio/owner")'])
+    : JSON.stringify(['read("any")', 'update("users")', 'delete("users")']);
+  notes.forEach((n, i) => {
+    const t = new Date(Date.now() - (i + 1) * 3600_000 * 7).toISOString();
+    insDoc.run(uid('doc_'), 'col_notes', JSON.stringify({ title: n[0], visibility: n[1], body: n[2] }), perms(n[1]), t, t);
   });
 
   /* ------------------------------------------------------------- functions */
@@ -328,9 +350,11 @@ export default async ({ req, res, log, env }) => {
   });
 
   /* -------------------------------------------------------------- api keys */
-  db.prepare('INSERT INTO apiKeys (id,name,scopes,secret,lastUsedAt,createdAt) VALUES (?,?,?,?,?,?)').run(
+  // 只存摘要：演示数据里的这把 key 创建后明文就丢掉了，和真实产品一致
+  const demoKeySecret = newApiKeySecret();
+  db.prepare('INSERT INTO apiKeys (id,name,scopes,secretHash,preview,lastUsedAt,createdAt) VALUES (?,?,?,?,?,?,?)').run(
     'key_web', 'Storefront (web)', JSON.stringify(['databases.read', 'databases.write', 'storage.read']),
-    'standard_' + crypto.randomBytes(12).toString('hex'),
+    hashApiKey(demoKeySecret), previewApiKey(demoKeySecret),
     new Date(Date.now() - 3600_000).toISOString(), new Date(Date.now() - 20 * 86400_000).toISOString(),
   );
 

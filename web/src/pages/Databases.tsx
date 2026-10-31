@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   Database, Plus, Search, Trash2, Pencil, RefreshCw, SlidersHorizontal,
   ChevronLeft, ChevronRight, Rows3, X, Check, Type, Hash, ToggleLeft, Calendar,
-  Mail, Link2, List, AlignLeft, FileJson, Table2,
+  Mail, Link2, List, AlignLeft, FileJson, Table2, ShieldCheck, ShieldOff, Lock,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Attribute, Collection, Doc } from '../types';
@@ -17,11 +17,13 @@ const TYPE_ICON: Record<string, any> = {
   datetime: Calendar, email: Mail, url: Link2, enum: List,
 };
 
+const DEFAULT_PERMS = ['read("any")', 'update("users")', 'delete("users")'];
+
 export default function Databases() {
   const { id } = useParams();
   const nav = useNavigate();
   const toast = useToast();
-  const { can } = useAuth();
+  const { can, me } = useAuth();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [active, setActive] = useState<Collection | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -32,11 +34,12 @@ export default function Databases() {
   const [docLoading, setDocLoading] = useState(false);
 
   const [newCol, setNewCol] = useState(false);
-  const [colForm, setColForm] = useState({ name: '', key: '', icon: 'database', color: '#6C5CE7' });
+  const [colForm, setColForm] = useState({ name: '', key: '', icon: 'database', color: '#6C5CE7', documentSecurity: false });
   const [attrModal, setAttrModal] = useState(false);
   const [editing, setEditing] = useState<Doc | null>(null);
   const [docDrawer, setDocDrawer] = useState<'create' | 'edit' | null>(null);
   const [docData, setDocData] = useState<Record<string, any>>({});
+  const [permText, setPermText] = useState('');
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonText, setJsonText] = useState('{}');
   const [saving, setSaving] = useState(false);
@@ -78,6 +81,7 @@ export default function Databases() {
   const openCreate = () => {
     setEditing(null);
     setDocData({});
+    setPermText(DEFAULT_PERMS.join('\n'));
     setJsonText('{}');
     setJsonMode(false);
     setDocDrawer('create');
@@ -85,9 +89,23 @@ export default function Databases() {
   const openEdit = (d: Doc) => {
     setEditing(d);
     setDocData({ ...d.data });
+    setPermText((d.permissions?.length ? d.permissions : DEFAULT_PERMS).join('\n'));
     setJsonText(JSON.stringify(d.data, null, 2));
     setJsonMode(false);
     setDocDrawer('edit');
+  };
+
+  const parsePerms = () =>
+    permText.split('\n').map((s) => s.trim()).filter(Boolean);
+
+  const toggleSecurity = async () => {
+    if (!active) return;
+    try {
+      const c = await api.updateCollection(active.id, { documentSecurity: !active.documentSecurity });
+      toast.push(`Document-level security ${c.documentSecurity ? 'enabled' : 'disabled'}`);
+      await loadCollections();
+      await loadDocs();
+    } catch (e: any) { toast.push(e.message, 'err'); }
   };
 
   const saveDoc = async () => {
@@ -119,10 +137,10 @@ export default function Databases() {
         try { payload = JSON.parse(jsonText); } catch { throw new Error('Invalid JSON payload'); }
       }
       if (editing) {
-        await api.updateDocument(active.id, editing.id, payload);
+        await api.updateDocument(active.id, editing.id, payload, active.documentSecurity ? parsePerms() : undefined);
         toast.push('Document updated');
       } else {
-        await api.createDocument(active.id, payload);
+        await api.createDocument(active.id, payload, active.documentSecurity ? parsePerms() : undefined);
         toast.push('Document created');
       }
       setDocDrawer(null);
@@ -138,7 +156,7 @@ export default function Databases() {
       const c = await api.createCollection(colForm);
       toast.push(`Collection "${c.name}" created`);
       setNewCol(false);
-      setColForm({ name: '', key: '', icon: 'database', color: '#6C5CE7' });
+      setColForm({ name: '', key: '', icon: 'database', color: '#6C5CE7', documentSecurity: false });
       await loadCollections();
       nav(`/databases/${c.id}`);
     } catch (e: any) { toast.push(e.message, 'err'); }
@@ -241,6 +259,18 @@ export default function Databases() {
                     );
                   })}
                   {!active.attributes?.length && <span className="tiny dim">No attributes — add one to start storing data.</span>}
+                  <button
+                    className={`btn sm ${active.documentSecurity ? '' : 'ghost'}`}
+                    style={{ marginLeft: 'auto' }}
+                    onClick={toggleSecurity}
+                    disabled={!can('databases.write')}
+                    title={active.documentSecurity
+                      ? 'Each document decides who can read / write it'
+                      : 'Access is decided by the project role only'}
+                  >
+                    {active.documentSecurity ? <ShieldCheck size={12} /> : <ShieldOff size={12} />}
+                    {active.documentSecurity ? 'Document security' : 'No document security'}
+                  </button>
                 </div>
 
                 <div className="toolbar">
@@ -273,7 +303,14 @@ export default function Databases() {
                       <tbody>
                         {docs.map((d) => (
                           <tr key={d.id} className="pointer" onClick={() => openEdit(d)}>
-                            <td><span className="row-id">{d.id}</span></td>
+                            <td>
+                              <span className="row-id">{d.id}</span>
+                              {active.documentSecurity && (
+                                <span title={d.permissions?.join(' · ')} style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+                                  <Lock size={10} style={{ opacity: 0.4 }} />
+                                </span>
+                              )}
+                            </td>
                             {columns.map((c) => (
                               <td key={c.id}>
                                 {c.type === 'enum' || c.type === 'boolean' ? (
@@ -366,6 +403,16 @@ export default function Databases() {
               onChange={(e) => setColForm({ ...colForm, color: e.target.value })} />
           </div>
         </div>
+        <label className="flex pointer" style={{ gap: 8, alignItems: 'flex-start', fontSize: 12, marginTop: 4 }}>
+          <input type="checkbox" checked={colForm.documentSecurity}
+            onChange={(e) => setColForm({ ...colForm, documentSecurity: e.target.checked })} style={{ marginTop: 2 }} />
+          <span>
+            Document-level security
+            <span className="hint" style={{ display: 'block', marginTop: 2 }}>
+              Each document carries its own <code className="mono">read("…")</code> rules. Off by default — the project role decides.
+            </span>
+          </span>
+        </label>
       </Modal>
 
       {/* attributes */}
@@ -414,6 +461,28 @@ export default function Databases() {
           ))
         )}
         {!active?.attributes?.length && <div className="hint">This collection has no attributes. Use JSON mode to store arbitrary data.</div>}
+
+        {active?.documentSecurity && (
+          <div className="field" style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+            <label className="label"><Lock size={11} /> Document permissions</label>
+            <textarea
+              className="textarea mono" style={{ minHeight: 92, fontSize: 12 }}
+              value={permText} onChange={(e) => setPermText(e.target.value)}
+              placeholder={'read("any")\nupdate("users")\ndelete("users")'}
+            />
+            <div className="hint">
+              One rule per line. Targets: <code className="mono">any</code>, <code className="mono">users</code>,
+              {' '}<code className="mono">user:&lt;id&gt;</code>, <code className="mono">team:&lt;projectId&gt;/&lt;role&gt;</code>.
+              {' '}<code className="mono">write(…)</code> covers update + delete. Read is enforced on list &amp; get.
+            </div>
+            <div className="flex" style={{ gap: 6, marginTop: 4 }}>
+              <button className="btn sm ghost" onClick={() => setPermText(DEFAULT_PERMS.join('\n'))}>Use defaults</button>
+              <button className="btn sm ghost" onClick={() => setPermText(`read("user:${me?.principal?.id || 'usr_x'}")\nupdate("user:${me?.principal?.id || 'usr_x'}")\ndelete("user:${me?.principal?.id || 'usr_x'}")`)}>
+                Only me
+              </button>
+            </div>
+          </div>
+        )}
       </Drawer>
 
       <Modal

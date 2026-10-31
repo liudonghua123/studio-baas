@@ -150,7 +150,7 @@ export default function Settings() {
                   {keys.map((k) => (
                     <tr key={k.id}>
                       <td className="cell-main">{k.name}</td>
-                      <td><span className="mono tiny dim">{k.secret.slice(0, 18)}••••</span></td>
+                      <td><span className="mono tiny dim">{k.preview || '—'}</span></td>
                       <td><div className="flex" style={{ gap: 4, flexWrap: 'wrap' }}>{k.scopes.slice(0, 2).map((s) => <Badge key={s} tone="violet">{s}</Badge>)}{k.scopes.length > 2 && <Badge>+{k.scopes.length - 2}</Badge>}</div></td>
                       <td className="dim tiny">{timeAgo(k.lastUsedAt)}</td>
                       <td className="dim tiny">{fmtDate(k.createdAt)}</td>
@@ -179,9 +179,10 @@ export default function Settings() {
             </div>
             <div className="card-body">
               <ul className="tiny muted" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.9 }}>
-                <li>Function code runs in a Node.js <span className="mono">vm</span> sandbox with a module allowlist and 15s timeout — not a hardened multi-tenant isolation boundary.</li>
+                <li>Function code runs in a dedicated <span className="mono">worker_threads</span> isolate: the timeout terminates the thread, so a runaway loop can't stall the API. Still a shared kernel, not a hardened container.</li>
+                <li>API keys are stored as SHA-256 digests — the plaintext is returned once on creation, and the list only shows a preview.</li>
+                <li>Document-level permissions (<span className="mono">read("user:…")</span>, <span className="mono">team:…/role</span>) are enforced on list, get, update and delete when a collection enables document security.</li>
                 <li>Files are stored on the local filesystem under <span className="mono">server/data/uploads</span>; bucket encryption flags are metadata only in this demo.</li>
-                <li>API keys are shown for demonstration; production deployments should hash and scope them server-side.</li>
                 <li>Never commit a real DeepSeek key. Prefer the <span className="mono">DEEPSEEK_API_KEY</span> environment variable.</li>
               </ul>
             </div>
@@ -214,7 +215,7 @@ export default function Settings() {
       </Modal>
 
       <Modal open={!!created} onClose={() => setCreated(null)} title="API key created"
-        subtitle="Copy it now — it won't be shown again in a real deployment."
+        subtitle="Copy it now — only a SHA-256 digest is stored, so it can't be shown again."
         footer={<button className="btn primary" onClick={() => setCreated(null)}>Done</button>}
       >
         <div className="field">
@@ -224,7 +225,7 @@ export default function Settings() {
             <button className="btn ghost" onClick={() => navigator.clipboard.writeText(created?.secret || '')}><Copy size={14} /></button>
           </div>
         </div>
-        <div className="hint">Use it as <span className="mono">X-Appwrite-Key</span> when calling the REST API.</div>
+        <div className="hint">Send it as the <span className="mono">x-api-key</span> header. The list only ever shows a preview.</div>
       </Modal>
     </div>
   );

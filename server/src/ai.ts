@@ -170,6 +170,10 @@ export const tools: ToolDef[] = [
       properties: {
         collection: { type: 'string' },
         data: { type: 'object', description: 'Key/value object matching the collection schema', additionalProperties: true },
+        permissions: {
+          type: 'array', items: { type: 'string' },
+          description: 'Only used when the collection enables document security, e.g. ["read(\"any\")","update(\"team:studio/owner\")"]. Omit to use the defaults.',
+        },
       },
       required: ['collection', 'data'],
     },
@@ -177,8 +181,8 @@ export const tools: ToolDef[] = [
     run: (a) => {
       const c = resolveCollection(a.collection);
       if (!c) throw new Error(`Collection "${a.collection}" not found`);
-      const d = createDocument(c.id, a.data || {});
-      return { ok: true, id: d.id, collection: c.name, data: d.data };
+      const d = createDocument(c.id, a.data || {}, undefined, a.permissions);
+      return { ok: true, id: d.id, collection: c.name, data: d.data, permissions: d.permissions };
     },
   },
   {
@@ -189,6 +193,7 @@ export const tools: ToolDef[] = [
       properties: {
         collection: { type: 'string' }, documentId: { type: 'string' },
         data: { type: 'object', additionalProperties: true },
+        permissions: { type: 'array', items: { type: 'string' }, description: 'Replace the document permissions, e.g. ["read(\"users\")"]' },
       },
       required: ['collection', 'documentId', 'data'],
     },
@@ -196,9 +201,9 @@ export const tools: ToolDef[] = [
     run: (a) => {
       const c = resolveCollection(a.collection);
       if (!c) throw new Error(`Collection "${a.collection}" not found`);
-      const d = updateDocument(c.id, a.documentId, a.data || {});
+      const d = updateDocument(c.id, a.documentId, a.data || {}, true, a.permissions);
       if (!d) throw new Error('Document not found');
-      return { ok: true, id: d.id, data: d.data };
+      return { ok: true, id: d.id, data: d.data, permissions: d.permissions };
     },
   },
   {

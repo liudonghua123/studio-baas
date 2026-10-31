@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hashApiKey, previewApiKey } from './apikey.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = process.env.DATA_DIR || path.resolve(here, '../data');
@@ -76,6 +77,7 @@ export function migrate() {
   );
   CREATE TABLE IF NOT EXISTS apiKeys (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, scopes TEXT, secret TEXT,
+    secretHash TEXT, preview TEXT,
     lastUsedAt TEXT, createdAt TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS logs (
@@ -143,6 +145,20 @@ export function migrate() {
   db.exec(`UPDATE projects SET key=lower(replace(name,' ','-')) WHERE key IS NULL OR key=''`);
   db.exec(`UPDATE projects SET status='active' WHERE status IS NULL`);
   db.exec(`UPDATE projects SET updatedAt=createdAt WHERE updatedAt IS NULL`);
+
+  /* ------------------------------------------------ api key hashing (v1.7) */
+  addColumn('apiKeys', 'secretHash', 'TEXT');
+  addColumn('apiKeys', 'preview', 'TEXT');
+  // 历史数据是明文 secret：就地转成摘要 + 预览，然后把明文抹掉。
+  // 转换后旧密钥依然可用（校验是「对明文做 sha256 再比对」）。
+  const legacy = db.prepare(
+    "SELECT id, secret FROM apiKeys WHERE (secretHash IS NULL OR secretHash='') AND secret IS NOT NULL AND secret<>''",
+  ).all() as { id: string; secret: string }[];
+  if (legacy.length) {
+    const upd = db.prepare('UPDATE apiKeys SET secretHash=?, preview=?, secret=NULL WHERE id=?');
+    db.transaction(() => { for (const k of legacy) upd.run(hashApiKey(k.secret), previewApiKey(k.secret), k.id); })();
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_apiKeys_hash ON apiKeys(secretHash)');
 }
 
 export const now = () => new Date().toISOString();

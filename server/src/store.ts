@@ -4,8 +4,12 @@ import crypto from 'node:crypto';
 import { db, now, uid, UPLOAD_DIR } from './db.js';
 import { bus } from './events.js';
 import { executeFunctionCode, type ExecContext } from './runtime.js';
-import { currentProjectId } from './context.js';
+import { currentProjectId, currentPrincipal } from './context.js';
 import { parseQueries } from './query.js';
+import { hashApiKey, newApiKeySecret, previewApiKey } from './apikey.js';
+import {
+  assertPermissionRules, documentAllows, ForbiddenError, DEFAULT_DOCUMENT_PERMISSIONS,
+} from './docperm.js';
 
 /** 当前请求所属项目；store 层所有查询据此隔离 */
 const pid = () => currentProjectId();
@@ -249,11 +253,26 @@ export function listDocuments(collectionId: string, opts: {
     const dir = opts.orderType === 'asc' ? 'ASC' : 'DESC';
     order = opts.orderBy === '$createdAt' ? `createdAt ${dir}` : `json_extract(data, '$.${opts.orderBy.replace(/[^a-zA-Z0-9_]/g, '')}') ${dir}`;
   }
-  const total = (db.prepare(`SELECT COUNT(*) c FROM documents WHERE ${where.join(' AND ')}`).get(...params) as any).c;
-  const rows = db.prepare(
-    `SELECT * FROM documents WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`,
-  ).all(...params, limit, offset) as any[];
-  const documents = rows.map(docFromRow);
+
+  let documents: Doc[];
+  let total: number;
+  if (col.documentSecurity) {
+    // 权限是 JSON 数组里的字符串，SQLite 没法按规则过滤：先取候选集再在内存判定。
+    // 演示规模（万级以下）完全够用；生产应把 permissions 拆成索引表，见文档 P1。
+    const candidates = db.prepare(
+      `SELECT * FROM documents WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 5000`,
+    ).all(...params) as any[];
+    const principal = currentPrincipal();
+    const visible = candidates.map(docFromRow).filter((d) => documentAllows(d.permissions, 'read', principal, pid()));
+    total = visible.length;
+    documents = visible.slice(offset, offset + limit);
+  } else {
+    total = (db.prepare(`SELECT COUNT(*) c FROM documents WHERE ${where.join(' AND ')}`).get(...params) as any).c;
+    documents = (db.prepare(
+      `SELECT * FROM documents WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`,
+    ).all(...params, limit, offset) as any[]).map(docFromRow);
+  }
+
   if (q.select) {
     const keep = new Set(q.select);
     for (const d of documents) {
@@ -263,41 +282,73 @@ export function listDocuments(collectionId: string, opts: {
   return { total, limit, offset, documents };
 }
 
-export function getDocument(collectionId: string, docId: string): Doc | null {
-  const col = getCollection(collectionId);
-  if (!col) return null;
-  const r = db.prepare('SELECT * FROM documents WHERE id=? AND collectionId=?').get(docId, col.id) as any;
+/** 不做权限判定的原始读取，仅供内部（更新/删除前取当前值）使用 */
+function getDocumentRaw(colId: string, docId: string): Doc | null {
+  const r = db.prepare('SELECT * FROM documents WHERE id=? AND collectionId=?').get(docId, colId) as any;
   return r ? docFromRow(r) : null;
 }
 
-export function createDocument(collectionId: string, data: Record<string, unknown>, docId?: string, permissions: string[] = ['read("any")', 'update("users")', 'delete("users")']): Doc {
+export function getDocument(collectionId: string, docId: string): Doc | null {
+  const col = getCollection(collectionId);
+  if (!col) return null;
+  const doc = getDocumentRaw(col.id, docId);
+  if (!doc) return null;
+  // 无 read 权限时返回 null（对外 404），避免通过 403/404 的差异探测文档是否存在
+  if (col.documentSecurity && !documentAllows(doc.permissions, 'read', currentPrincipal(), pid())) return null;
+  return doc;
+}
+
+export function createDocument(
+  collectionId: string,
+  data: Record<string, unknown>,
+  docId?: string,
+  permissions: string[] = DEFAULT_DOCUMENT_PERMISSIONS,
+): Doc {
   const col = getCollection(collectionId);
   if (!col) throw new Error(`Collection "${collectionId}" not found`);
   const clean = validateDocument(col.id, data);
+  const rules = permissions?.length ? assertPermissionRules(permissions) : DEFAULT_DOCUMENT_PERMISSIONS;
   const id = docId || uid('doc_');
   const t = now();
   db.prepare('INSERT INTO documents (id,collectionId,data,permissions,createdAt,updatedAt) VALUES (?,?,?,?,?,?)').run(
-    id, col.id, JSON.stringify(clean), JSON.stringify(permissions), t, t,
+    id, col.id, JSON.stringify(clean), JSON.stringify(rules), t, t,
   );
   bus.publish({ type: 'document', action: 'create', resource: col.key });
-  return getDocument(col.id, id)!;
+  return getDocumentRaw(col.id, id)!;
 }
 
-export function updateDocument(collectionId: string, docId: string, data: Record<string, unknown>, merge = true): Doc | null {
+export function updateDocument(
+  collectionId: string,
+  docId: string,
+  data: Record<string, unknown>,
+  merge = true,
+  permissions?: string[],
+): Doc | null {
   const col = getCollection(collectionId);
   if (!col) return null;
-  const cur = getDocument(col.id, docId);
+  const cur = getDocumentRaw(col.id, docId);
   if (!cur) return null;
+  if (col.documentSecurity && !documentAllows(cur.permissions, 'update', currentPrincipal(), pid())) {
+    throw new ForbiddenError(`Document ${docId} does not grant update to the current identity`, 'update');
+  }
   const merged = merge ? { ...cur.data, ...data } : data;
   const clean = validateDocument(col.id, merged);
-  db.prepare('UPDATE documents SET data=?, updatedAt=? WHERE id=?').run(JSON.stringify(clean), now(), docId);
+  const nextPerms = permissions === undefined ? cur.permissions : assertPermissionRules(permissions);
+  db.prepare('UPDATE documents SET data=?,permissions=?,updatedAt=? WHERE id=?').run(
+    JSON.stringify(clean), JSON.stringify(nextPerms), now(), docId,
+  );
   bus.publish({ type: 'document', action: 'update', resource: col.key });
-  return getDocument(col.id, docId);
+  return getDocumentRaw(col.id, docId);
 }
 
 export function deleteDocument(collectionId: string, docId: string): boolean {
   const col = getCollection(collectionId);
   if (!col) return false;
+  const cur = getDocumentRaw(col.id, docId);
+  if (!cur) return false;
+  if (col.documentSecurity && !documentAllows(cur.permissions, 'delete', currentPrincipal(), pid())) {
+    throw new ForbiddenError(`Document ${docId} does not grant delete to the current identity`, 'delete');
+  }
   const r = db.prepare('DELETE FROM documents WHERE id=? AND collectionId=?').run(docId, col.id);
   bus.publish({ type: 'document', action: 'delete', resource: col.key });
   return r.changes > 0;
@@ -740,17 +791,20 @@ export function listMessages(limit = 50) {
 export function listApiKeys() {
   return (db.prepare('SELECT * FROM apiKeys WHERE projectId=? ORDER BY createdAt DESC').all(pid()) as any[]).map((r) => ({
     id: r.id, name: r.name, scopes: safeJson<string[]>(r.scopes, []),
-    secret: r.secret, lastUsedAt: r.lastUsedAt, createdAt: r.createdAt,
+    // 明文只在创建时返回一次，列表里永远只有预览
+    preview: r.preview || (r.secret ? previewApiKey(r.secret) : ''),
+    lastUsedAt: r.lastUsedAt, createdAt: r.createdAt,
   }));
 }
 
 export function createApiKey(name: string, scopes: string[]) {
   const id = uid('key_');
-  const secret = 'standard_' + crypto.randomBytes(24).toString('hex');
-  db.prepare('INSERT INTO apiKeys (id,name,scopes,secret,lastUsedAt,createdAt,projectId) VALUES (?,?,?,?,?,?,?)').run(
-    id, name, JSON.stringify(scopes), secret, null, now(), pid(),
+  const secret = newApiKeySecret();
+  db.prepare('INSERT INTO apiKeys (id,name,scopes,secretHash,preview,lastUsedAt,createdAt,projectId) VALUES (?,?,?,?,?,?,?,?)').run(
+    id, name, JSON.stringify(scopes), hashApiKey(secret), previewApiKey(secret), null, now(), pid(),
   );
-  return listApiKeys().find((k) => k.id === id)!;
+  // 注意：这里返回的 secret 是唯一一次能拿到明文的机会
+  return { ...listApiKeys().find((k) => k.id === id)!, secret };
 }
 
 export function deleteApiKey(id: string) {

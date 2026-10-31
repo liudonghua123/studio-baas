@@ -89,7 +89,11 @@ export interface Message {
   status: string; createdAt: string;
 }
 export interface ApiKey {
-  id: string; name: string; scopes: string[]; secret: string;
+  id: string; name: string; scopes: string[];
+  /** 列表接口只返回预览（standard_ab12••••3f9c） */
+  preview: string;
+  /** 仅创建响应里出现一次，之后不可再取 */
+  secret?: string;
   lastUsedAt: string | null; createdAt: string;
 }
 export interface LogEntry {

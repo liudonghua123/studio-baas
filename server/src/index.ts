@@ -65,9 +65,13 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<any> 
   };
 const fail = (res: express.Response, e: any, code?: number) => {
   const msg = e?.message || String(e);
-  // 领域错误统一走 400，但 “xxx not found” 应该是 404，否则客户端无法区分参数错误与资源缺失
-  const status = code ?? (/not found/i.test(msg) ? 404 : 400);
-  res.status(status).json({ ok: false, error: msg });
+  // 领域错误统一走 400，但 “xxx not found” 应该是 404，否则客户端无法区分参数错误与资源缺失；
+  // docperm 抛的 ForbiddenError 自带 403，不能降级成 400
+  const status = code ?? (Number(e?.status) || (/not found/i.test(msg) ? 404 : 400));
+  const body: Record<string, unknown> = { ok: false, error: msg };
+  if (e?.code === 'forbidden') body.code = 'forbidden';
+  if (e?.action) body.action = e.action;
+  res.status(status).json(body);
 };
 
 /* ----------------------------------------------------------- request logs */
@@ -171,6 +175,14 @@ app.delete('/v1/projects/:id', guard('project.delete'), wrap((req, res) => {
 app.get('/v1/metrics', guard('project.read'), (_req, res) => res.json(store.getMetrics()));
 
 /* ------------------------------------------------------------ databases */
+/** 文档请求体既支持 { data: {...}, permissions: [...] }，也支持直接摊平写字段 */
+const docPayload = (body: any) => {
+  if (body && typeof body === 'object' && body.data && typeof body.data === 'object') return body.data;
+  if (!body || typeof body !== 'object') return body ?? {};
+  const { permissions: _p, documentId: _d, ...rest } = body;
+  return rest;
+};
+
 app.get('/v1/databases/collections', guard('databases.read'), (_req, res) => res.json({ total: store.listCollections().length, collections: store.listCollections() }));
 
 app.post('/v1/databases/collections', guard('databases.write'), wrap((req, res) => {
@@ -219,7 +231,7 @@ app.get('/v1/databases/collections/:id/documents', guard('databases.read'), wrap
 }));
 
 app.post('/v1/databases/collections/:id/documents', guard('databases.write'), wrap((req, res) => {
-  const d = store.createDocument(req.params.id, req.body?.data ?? req.body, req.body?.documentId, req.body?.permissions);
+  const d = store.createDocument(req.params.id, docPayload(req.body), req.body?.documentId, req.body?.permissions);
   res.status(201).json(d);
 }));
 
@@ -230,7 +242,9 @@ app.get('/v1/databases/collections/:id/documents/:docId', guard('databases.read'
 }));
 
 app.patch('/v1/databases/collections/:id/documents/:docId', guard('databases.write'), wrap((req, res) => {
-  const d = store.updateDocument(req.params.id, req.params.docId, req.body?.data ?? req.body);
+  const d = store.updateDocument(
+    req.params.id, req.params.docId, docPayload(req.body), true, req.body?.permissions,
+  );
   if (!d) return fail(res, new Error('Document not found'), 404);
   res.json(d);
 }));

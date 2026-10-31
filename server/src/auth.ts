@@ -4,6 +4,7 @@ import type { Principal } from './context.js';
 import { currentPrincipal, currentProjectId } from './context.js';
 import { roleAllows, permissionsForRole } from './rbac.js';
 import * as members from './members.js';
+import { hashApiKey } from './apikey.js';
 
 export interface ResolvedAuth {
   principal: Principal;
@@ -20,7 +21,8 @@ export interface ResolvedAuth {
 export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'): ResolvedAuth {
   const key = req.header('x-api-key');
   if (key) {
-    const row = db.prepare('SELECT * FROM apiKeys WHERE secret=?').get(key) as any;
+    // 库里只有 sha256 摘要，明文永不落盘
+    const row = db.prepare('SELECT * FROM apiKeys WHERE secretHash=?').get(hashApiKey(key)) as any;
     if (row) {
       db.prepare('UPDATE apiKeys SET lastUsedAt=? WHERE id=?').run(now(), row.id);
       return {

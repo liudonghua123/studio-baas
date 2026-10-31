@@ -57,6 +57,7 @@ export const api = {
   collections: () => get<{ collections: Collection[] }>('/v1/databases/collections'),
   collection: (id: string) => get<Collection>(`/v1/databases/collections/${id}`),
   createCollection: (body: any) => post<Collection>('/v1/databases/collections', body),
+  updateCollection: (id: string, body: any) => patch<Collection>(`/v1/databases/collections/${id}`, body),
   deleteCollection: (id: string) => del(`/v1/databases/collections/${id}`),
   addAttribute: (id: string, body: any) => post<Attribute>(`/v1/databases/collections/${id}/attributes`, body),
   deleteAttribute: (id: string, attrId: string) => del(`/v1/databases/collections/${id}/attributes/${attrId}`),
@@ -65,8 +66,10 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '' && v !== null) qs.set(k, String(v)); });
     return get<{ total: number; documents: Doc[]; limit: number; offset: number }>(`/v1/databases/collections/${id}/documents?${qs}`);
   },
-  createDocument: (id: string, data: Record<string, any>) => post<Doc>(`/v1/databases/collections/${id}/documents`, { data }),
-  updateDocument: (id: string, docId: string, data: Record<string, any>) => patch<Doc>(`/v1/databases/collections/${id}/documents/${docId}`, { data }),
+  createDocument: (id: string, data: Record<string, any>, permissions?: string[]) =>
+    post<Doc>(`/v1/databases/collections/${id}/documents`, { data, ...(permissions ? { permissions } : {}) }),
+  updateDocument: (id: string, docId: string, data: Record<string, any>, permissions?: string[]) =>
+    patch<Doc>(`/v1/databases/collections/${id}/documents/${docId}`, { data, ...(permissions ? { permissions } : {}) }),
   deleteDocument: (id: string, docId: string) => del(`/v1/databases/collections/${id}/documents/${docId}`),
 
   buckets: () => get<{ buckets: Bucket[] }>('/v1/storage/buckets'),
