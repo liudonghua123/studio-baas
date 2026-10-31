@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate, db, now } from './db.js';
-import { seed, seedDemoProject, seedMembers } from './seed.js';
+import { seed, seedDemoProject, seedMembers, seedSchedules } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
@@ -14,6 +14,7 @@ import { runWithContext, withProject, currentProjectId, DEFAULT_PROJECT_ID } fro
 import { resolveAuth, guard, me } from './auth.js';
 import * as members from './members.js';
 import * as domains from './domains.js';
+import * as schedules from './schedules.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,7 @@ migrate();
 const seeded = seed();
 seedDemoProject();
 seedMembers();
+seedSchedules();
 
 const app = express();
 app.use(cors());
@@ -282,6 +284,47 @@ app.get('/v1/functions/:id/executions', guard('functions.read'), wrap((req, res)
 
 app.get('/v1/executions', guard('functions.read'), (_req, res) => res.json({ executions: store.listExecutions(undefined, 30) }));
 
+/* ----------------------------------------------------- function schedules */
+app.get('/v1/schedules', guard('functions.read'), (_req, res) => {
+  res.json({ schedules: schedules.listSchedules() });
+});
+
+app.get('/v1/cron/preview', guard('functions.read'), wrap((req, res) => {
+  const expr = String(req.query.expr || '');
+  const tz = String(req.query.tz || 'UTC');
+  try {
+    res.json(schedules.preview(expr, Number(req.query.count) || 3, tz));
+  } catch (e: any) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+}));
+
+app.get('/v1/functions/:id/schedules', guard('functions.read'), wrap((req, res) => {
+  res.json({ schedules: schedules.listSchedules(req.params.id) });
+}));
+
+app.post('/v1/functions/:id/schedules', guard('functions.write'), wrap((req, res) => {
+  res.status(201).json(schedules.createSchedule(req.params.id, req.body || {}));
+}));
+
+app.patch('/v1/schedules/:sid', guard('functions.write'), wrap((req, res) => {
+  const s = schedules.updateSchedule(req.params.sid, req.body || {});
+  if (!s) return fail(res, new Error('Schedule not found'), 404);
+  res.json(s);
+}));
+
+app.delete('/v1/schedules/:sid', guard('functions.write'), wrap((req, res) => {
+  res.json({ ok: schedules.deleteSchedule(req.params.sid) });
+}));
+
+app.post('/v1/schedules/:sid/run', guard('functions.execute'), wrap(async (req, res) => {
+  const r = db.prepare('SELECT * FROM schedules WHERE id=? AND projectId=?').get(req.params.sid, currentProjectId()) as any;
+  if (!r) return fail(res, new Error('Schedule not found'), 404);
+  const out = await store.executeFunction(r.functionId, { source: 'schedule', manual: true, cron: r.cron }, 'schedule');
+  schedules.markRun(r.id, out.status, r.cron, r.timezone);
+  res.json(out);
+}));
+
 /* ------------------------------------------------------- function domains */
 app.get('/v1/functions/:id/domains', guard('functions.read'), wrap((req, res) => {
   res.json({ domains: domains.listDomains(req.params.id) });
@@ -471,6 +514,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   console.error(err);
   res.status(500).json({ ok: false, error: err?.message || 'Internal error' });
 });
+
+schedules.startScheduler();
 
 const PORT = Number(process.env.PORT) || 5174;
 app.listen(PORT, '0.0.0.0', () => {

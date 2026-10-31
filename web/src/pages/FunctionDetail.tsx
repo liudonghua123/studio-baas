@@ -12,6 +12,7 @@ import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDuration, statusTone, timeAgo, fmtDateTime } from '../lib/format';
 import { useAuth } from '../lib/auth';
 import DomainsTab from '../components/DomainsTab';
+import SchedulesTab from '../components/SchedulesTab';
 
 export default function FunctionDetail() {
   const { id } = useParams();
@@ -32,7 +33,7 @@ export default function FunctionDetail() {
   const [envOpen, setEnvOpen] = useState(false);
   const [envRows, setEnvRows] = useState<{ k: string; v: string }[]>([]);
   const [meta, setMeta] = useState({ name: '', timeout: 15, schedule: '' });
-  const [view, setView] = useState<'code' | 'domains'>('code');
+  const [view, setView] = useState<'code' | 'domains' | 'schedules'>('code');
 
   const load = async () => {
     try {
@@ -138,6 +139,9 @@ export default function FunctionDetail() {
         </button>
         <button className={`tab ${view === 'domains' ? 'active' : ''}`} onClick={() => setView('domains')}>
           <Globe2 size={13} /> Domains
+        </button>
+        <button className={`tab ${view === 'schedules' ? 'active' : ''}`} onClick={() => setView('schedules')}>
+          <CalendarClock size={13} /> Schedules
         </button>
       </div>
 
@@ -262,8 +266,10 @@ export default function FunctionDetail() {
             </div>
           </div>
         </div>
-      </div>) : (
+      </div>) : view === 'domains' ? (
         <DomainsTab functionId={fn.id} functionName={fn.name} />
+      ) : (
+        <SchedulesTab functionId={fn.id} functionName={fn.name} />
       )}
 
       <Modal open={payloadOpen} onClose={() => setPayloadOpen(false)} title="Execute function"

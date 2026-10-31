@@ -40,6 +40,12 @@ export interface FunctionDomain {
   sslStatus: 'pending' | 'issued' | 'failed';
   createdAt: string; verifiedAt: string | null; lastCheckAt: string | null; note?: string;
 }
+export interface Schedule {
+  id: string; projectId: string; functionId: string; functionName?: string;
+  cron: string; timezone: string; enabled: boolean;
+  nextRunAt: string | null; lastRunAt: string | null; lastStatus: string | null;
+  description?: string; createdAt: string;
+}
 export interface Execution {
   id: string; functionId: string; functionName: string; status: string; triggerType: string;
   duration: number; logs: string[]; response: any; errors: string[]; createdAt: string;

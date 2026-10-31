@@ -1,6 +1,6 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, FunctionDomain, LogEntry, Me, Member, Message, Metrics, Project, Site, User,
+  FileItem, FunctionDef, FunctionDomain, LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -91,6 +91,14 @@ export const api = {
   addDomain: (id: string, hostname: string) => post<FunctionDomain>(`/v1/functions/${id}/domains`, { hostname }),
   verifyDomain: (id: string, domainId: string) => post<FunctionDomain>(`/v1/functions/${id}/domains/${domainId}/verify`),
   deleteDomain: (id: string, domainId: string) => del(`/v1/functions/${id}/domains/${domainId}`),
+  schedules: (id: string) => get<{ schedules: Schedule[] }>(`/v1/functions/${id}/schedules`),
+  allSchedules: () => get<{ schedules: Schedule[] }>('/v1/schedules'),
+  createSchedule: (id: string, body: any) => post<Schedule>(`/v1/functions/${id}/schedules`, body),
+  updateSchedule: (sid: string, body: any) => patch<Schedule>(`/v1/schedules/${sid}`, body),
+  deleteSchedule: (sid: string) => del(`/v1/schedules/${sid}`),
+  runSchedule: (sid: string) => post<Execution>(`/v1/schedules/${sid}/run`),
+  cronPreview: (expr: string, tz = 'UTC') =>
+    get<{ next: string[]; description: string }>(`/v1/cron/preview?expr=${encodeURIComponent(expr)}&tz=${encodeURIComponent(tz)}`),
 
   sites: () => get<{ sites: Site[] }>('/v1/sites'),
   site: (id: string) => get<Site>(`/v1/sites/${id}`),

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, now, uid, UPLOAD_DIR } from './db.js';
+import { nextRun } from './cron.js';
 
 /* --------------------------------------------------------------- helpers */
 
@@ -687,6 +688,29 @@ export function seedMembers() {
     db.prepare('INSERT INTO members (id,projectId,userId,role,createdAt) VALUES (?,?,?,?,?)').run(
       uid('mem_'), projectId, userId, role, now(),
     );
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------- 定时调度 */
+
+/** 幂等地给演示函数挂上调度（每 5 分钟 / 每天 02:00） */
+export function seedSchedules() {
+  const t = now();
+  const rows: [string, string, string][] = [
+    ['fn_health', '*/5 * * * *', 'UTC'],
+    ['fn_stats', '0 2 * * *', 'Europe/Berlin'],
+    ['fn_neb_rollup', '0 2 * * *', 'UTC'],
+  ];
+  for (const [functionId, cron, tz] of rows) {
+    const fn = db.prepare('SELECT id FROM functions WHERE id=?').get(functionId) as any;
+    if (!fn) continue;
+    if (db.prepare('SELECT 1 FROM schedules WHERE functionId=?').get(functionId)) continue;
+    const projectId = (db.prepare('SELECT projectId FROM functions WHERE id=?').get(functionId) as any).projectId;
+    let next = '';
+    try { next = nextRun(cron, new Date(), tz).toISOString(); } catch { continue; }
+    db.prepare(`INSERT INTO schedules (id,projectId,functionId,cron,timezone,enabled,nextRunAt,lastRunAt,lastStatus,createdAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(uid('sch_'), projectId, functionId, cron, tz, 1, next, null, null, t);
   }
   return true;
 }

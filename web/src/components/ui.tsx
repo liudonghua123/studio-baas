@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle, Check, Copy, Inbox, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------- toast */
@@ -42,7 +43,7 @@ export function Modal({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={`modal ${wide ? 'wide' : ''}`}>
         <div className="modal-head">
@@ -55,7 +56,8 @@ export function Modal({
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -68,7 +70,7 @@ export function Drawer({
   children: React.ReactNode; footer?: React.ReactNode;
 }) {
   if (!open) return null;
-  return (
+  return createPortal(
     <>
       <div className="drawer-backdrop" onClick={onClose} />
       <aside className="drawer">
@@ -82,7 +84,8 @@ export function Drawer({
         <div className="drawer-body">{children}</div>
         {footer && <div className="drawer-foot">{footer}</div>}
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
 

@@ -20,6 +20,22 @@ export const fmtDateTime = (iso?: string | null) => {
   return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
+/** Format an instant in a specific IANA timezone, e.g. "01 Nov, 09:00" */
+export const fmtInZone = (iso: string | null | undefined, timeZone: string) => {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('en-GB', {
+      timeZone, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  } catch {
+    return fmtDateTime(iso);
+  }
+};
+
+/** Short label for an IANA zone: "UTC" or "Berlin" */
+export const zoneLabel = (timeZone: string) =>
+  timeZone === 'UTC' ? 'UTC' : timeZone.split('/').pop()!.replace(/_/g, ' ');
+
 export const timeAgo = (iso?: string | null) => {
   if (!iso) return 'never';
   const diff = Date.now() - new Date(iso).getTime();
@@ -32,6 +48,19 @@ export const timeAgo = (iso?: string | null) => {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d}d ago`;
   return `${Math.floor(d / 30)}mo ago`;
+};
+
+export const timeUntil = (iso?: string | null) => {
+  if (!iso) return '—';
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff <= 0) return 'due now';
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return 'in <1m';
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `in ${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `in ${d}d ${h % 24}h`;
 };
 
 export const fmtDuration = (ms: number) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`);

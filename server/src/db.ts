@@ -90,6 +90,11 @@ export function migrate() {
     hostname TEXT NOT NULL UNIQUE, status TEXT NOT NULL, verificationToken TEXT,
     sslStatus TEXT, note TEXT, createdAt TEXT NOT NULL, verifiedAt TEXT, lastCheckAt TEXT
   );
+  CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, functionId TEXT NOT NULL, cron TEXT NOT NULL,
+    timezone TEXT, enabled INTEGER DEFAULT 1, nextRunAt TEXT, lastRunAt TEXT, lastStatus TEXT,
+    createdAt TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS members (
     id TEXT PRIMARY KEY, projectId TEXT NOT NULL, userId TEXT NOT NULL, role TEXT NOT NULL,
     createdAt TEXT NOT NULL, UNIQUE(projectId, userId)
@@ -101,6 +106,8 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_docs_col ON documents(collectionId);
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
+  CREATE INDEX IF NOT EXISTS idx_schedules_fn ON schedules(functionId);
+  CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(nextRunAt);
   CREATE INDEX IF NOT EXISTS idx_domains_fn ON functionDomains(functionId);
   CREATE INDEX IF NOT EXISTS idx_domains_host ON functionDomains(hostname);
   CREATE INDEX IF NOT EXISTS idx_members_project ON members(projectId);
