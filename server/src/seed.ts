@@ -715,6 +715,21 @@ export function seedSchedules() {
   return true;
 }
 
+/** 演示用的已生效自定义域名：让 Host 路由开箱可用 */
+export function seedDomains() {
+  const fn = db.prepare('SELECT * FROM functions WHERE id=?').get('fn_order') as any;
+  if (!fn) return false;
+  if (db.prepare('SELECT 1 FROM functionDomains WHERE functionId=?').get('fn_order')) return true;
+  const t = new Date(Date.now() - 6 * 86400_000).toISOString();
+  db.prepare(`INSERT INTO functionDomains
+    (id,projectId,functionId,hostname,status,verificationToken,sslStatus,note,createdAt,verifiedAt,lastCheckAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'dom_aurora_api', fn.projectId, 'fn_order', 'api.aurora.test', 'active',
+    'verified-demo-token', 'issued', 'Storefront checkout webhook endpoint', t, t, t,
+  );
+  return true;
+}
+
 /** 演示用 GitHub 连接：让 fn_stats 绑定到一个仓库，并写入两条部署记录 */
 export function seedGit() {
   const target = db.prepare('SELECT * FROM functions WHERE id=?').get('fn_stats') as any;

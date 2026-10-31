@@ -23,6 +23,7 @@
 | 文档 | 内容 |
 |---|---|
 | [使用指南](./docs/使用指南.md) | 逐模块截图 + 操作步骤，23 张界面图 |
+| [体验报告与差距分析](./docs/体验报告与差距分析.md) | 73 条 API 断言 + 15 页界面走查，逐项对照 Appwrite，含缺陷清单与路线图 |
 | [Appwrite 核心功能分析](./docs/Appwrite-核心功能分析.md) | 产品定位、架构、七大服务拆解、竞品对比、生产化差距（[PDF 版](./docs/Appwrite-核心功能分析.pdf)） |
 
 ## 核心交互
@@ -101,7 +102,7 @@ export default async ({ req, res, log, databases, env }) => {
 | 模块 | 能力 |
 |---|---|
 | **Dashboard** | 文档/文件/函数/用户指标、14 天流量趋势、服务健康、最近执行、集合分布 |
-| **Databases** | 集合与 9 种类型化属性、文档 CRUD、搜索分页、表单与 JSON 双模式编辑 |
+| **Databases** | 集合与 9 种类型化属性、文档 CRUD、Appwrite 风格 `queries[]` 过滤、表单与 JSON 双模式编辑 |
 | **Storage** | 多桶、扩展名白名单、体积限制、拖拽上传、图片预览、直链分享 |
 | **Functions** | 在线编辑（CodeMirror 6）、保存版本、自定义 payload 执行、日志/响应/错误、环境变量、执行历史 |
 | **Domains** | 自定义域名、TXT 校验、证书签发状态、Host 头路由、`DOMAIN_VERIFY_MODE` 真实校验 |
@@ -131,7 +132,7 @@ pnpm dev            # 控制台 http://localhost:5173 ，API :5174
 pnpm build && pnpm start   # http://localhost:5174
 ```
 
-首次启动自动建库并写入演示数据：2 个项目（**Aurora Commerce** 与 **Nebula Analytics**）、6 个集合、38 条文档、6 个文件、4 个云函数、3 个站点、6 位用户、7 条成员关系、定时任务、域名绑定与仓库部署记录，外加 14 天请求日志。删除 `server/data/` 即可重置。
+首次启动自动建库并写入演示数据：2 个项目（**Aurora Commerce** 与 **Nebula Analytics**）、6 个集合、37 条文档、6 个文件、4 个云函数、3 个站点、7 位用户、7 条成员关系、3 个定时任务、1 个已生效域名（`api.aurora.test` → `Order webhook`）、1 个仓库绑定与 2 条部署记录，外加 14 天请求日志。删除 `server/data/` 即可重置。
 
 ## 公网访问
 
@@ -215,7 +216,7 @@ studio-baas/
 |---|---|---|
 | GET | `/v1/metrics` | 指标、趋势、服务健康 |
 | GET/POST | `/v1/databases/collections` | 集合列表 / 创建 |
-| GET/POST | `/v1/databases/collections/:id/documents` | 文档查询 / 创建 |
+| GET/POST | `/v1/databases/collections/:id/documents` | 文档查询（支持 `queries[]`）/ 创建 |
 | PATCH/DELETE | `/v1/databases/collections/:id/documents/:docId` | 更新 / 删除 |
 | POST | `/v1/storage/buckets/:id/files` | multipart 上传 |
 | GET | `/v1/storage/files/:id/view` | 文件直链 |
