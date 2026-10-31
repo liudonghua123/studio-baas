@@ -215,7 +215,7 @@ export default function AI() {
         </div>
         <h3 style={{ marginTop: 20 }}>How it works</h3>
         <ol className="tiny dim" style={{ paddingLeft: 16, lineHeight: 1.8, margin: 0 }}>
-          <li>Your message goes to the harness with 26 tool schemas.</li>
+          <li>Your message goes to the harness with {status?.tools?.length || 0} tool schemas.</li>
           <li>DeepSeek picks tools; the server executes them against the live project.</li>
           <li>Results feed back into the model for the final answer.</li>
           <li>Every call is traced below the reply — audit exactly what changed.</li>
