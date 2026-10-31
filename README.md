@@ -14,7 +14,7 @@
 
 ## 这是什么
 
-把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 33 个工具**真实调用**平台 API 而不是只聊天。
+把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 37 个工具**真实调用**平台 API 而不是只聊天。
 
 资源都是**项目级**的：集合、存储桶、函数、站点、消息、API Key、日志、定时任务、域名、仓库绑定全部挂在 project 下，切换项目就切换整个上下文；每个项目再叠一层 RBAC（owner / admin / developer / viewer × 22 个权限点），人和 API Key 走同一套权限矩阵。
 
@@ -85,7 +85,7 @@ export default async ({ req, res, log, databases, env }) => {
 
 ![GitHub integration](./docs/screenshots/19-function-github.png)
 
-### AI 助手：33 个工具，覆盖全部服务
+### AI 助手：37 个工具，覆盖全部服务
 
 ![AI assistant](./docs/screenshots/12-ai-assistant.png)
 
@@ -102,7 +102,7 @@ export default async ({ req, res, log, databases, env }) => {
 | 模块 | 能力 |
 |---|---|
 | **Dashboard** | 文档/文件/函数/用户指标、14 天流量趋势、服务健康、最近执行、集合分布 |
-| **Databases** | 集合与 9 种类型化属性、文档 CRUD、Appwrite 风格 `queries[]` 过滤、**文档级权限**（`read("user:…")` / `team:…/role`）、表单与 JSON 双模式编辑 |
+| **Databases** | 集合与 9 种类型化属性、文档 CRUD、Appwrite 风格 `queries[]` 过滤、文档级权限（`read("user:…")` / `team:…/role`）、**key/unique 索引 + EXPLAIN 查询计划**、表单与 JSON 双模式编辑 |
 | **Storage** | 多桶、扩展名白名单、体积限制、拖拽上传、图片预览、直链分享 |
 | **Functions** | 在线编辑（CodeMirror 6）、**每次保存即不可变版本 + 一键回滚**、自定义 payload 执行、**worker 线程隔离执行**、日志/响应/错误、环境变量、执行历史 |
 | **Domains** | 自定义域名、TXT 校验、证书签发状态、Host 头路由、`DOMAIN_VERIFY_MODE` 真实校验 |
@@ -114,7 +114,7 @@ export default async ({ req, res, log, databases, env }) => {
 | **Auth** | 用户 CRUD、active / unverified / blocked、标签、scrypt 密码、会话登录 |
 | **Messaging** | Email / SMS / Push 统一发送与投递日志 |
 | **Logs** | 请求日志 SSE 实时 tail、按服务与状态码过滤 |
-| **AI Assistant** | DeepSeek 工具调用（33 个工具）、轨迹可视化、Demo 模式降级 |
+| **AI Assistant** | DeepSeek 工具调用（37 个工具）、轨迹可视化、Demo 模式降级 |
 | **Settings** | API Key 作用域管理（明文只返回一次，库里存 SHA-256）、DeepSeek 配置、重置演示数据 |
 
 ## 快速开始

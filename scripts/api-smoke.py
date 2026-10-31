@@ -4,12 +4,12 @@
 用法：pnpm dev 起服务后 `python3 scripts/api-smoke.py`；
 退出码非 0 表示有断言失败，可直接接进 CI。
 """
-import json, urllib.request, urllib.error, uuid, sys, time
+import json, urllib.request, urllib.error, urllib.parse, uuid, sys, time
 
 BASE = 'http://localhost:5174'
 results = []
 
-def call(method, path, body=None, project='studio', act_as=None, key=None, raw=None, headers=None, ctype='application/json'):
+def _raw_call(method, path, body=None, project='studio', act_as=None, key=None, raw=None, headers=None, ctype='application/json'):
     url = BASE + path
     data = None
     h = dict(headers or {})
@@ -36,6 +36,21 @@ def call(method, path, body=None, project='studio', act_as=None, key=None, raw=N
         return e.code, js, dict(e.headers)
     except Exception as e:
         return 0, {'transport': str(e)}, {}
+
+def call(method, path, body=None, project='studio', act_as=None, key=None, raw=None, headers=None, ctype='application/json'):
+    """429 时自动等待重试：登录限流是 8 次/分，短时间内连跑两遍脚本必然撞上。
+
+    限流本身是正确行为，不该让巡检变成 flaky。429 表示请求未被处理，
+    重试不会产生副作用。
+    """
+    for attempt in range(4):
+        s, js, hd = _raw_call(method, path, body, project, act_as, key, raw, headers, ctype)
+        if s == 429 and attempt < 3:
+            time.sleep(15)
+            continue
+        return s, js, hd
+    return s, js, hd
+
 
 def check(area, name, ok, detail=''):
     results.append({'area': area, 'name': name, 'ok': bool(ok), 'detail': str(detail)[:260]})
@@ -420,6 +435,79 @@ if fnid:
         check('versions', 'restore is recorded as a new version',
               len(vl2.get('versions', [])) == base + 2 and 'restored' in (vl2['versions'][0].get('label') or ''),
               f'{len(vl2.get("versions", []))} {vl2["versions"][0].get("label")}')
+
+# ------------------------------------------------------------------ 17 indexes
+s, ic, _ = call('POST', '/v1/databases/collections', {'name': f'Idx {TAG}'})
+check('indexes', 'create collection for index tests', s == 201, f'{s} {ic}')
+if s == 201:
+    icid = ic['id']
+    for k, t in [('status', 'string'), ('total', 'float'), ('code', 'string')]:
+        call('POST', f'/v1/databases/collections/{icid}/attributes', {'key': k, 'type': t})
+
+    def plan(*qs):
+        qs_ = urllib.parse.urlencode([('queries[]', q) for q in qs])
+        return call('GET', f'/v1/databases/collections/{icid}/query-plan?{qs_}')
+
+    def add_doc(data):
+        return call('POST', f'/v1/databases/collections/{icid}/documents', {'data': data})
+
+    s, p0, _ = plan('equal("status","paid")')
+    check('indexes', 'without an index the plan is a collection scan',
+          s == 200 and p0.get('narrowed') is False and p0.get('tempBTree') is True,
+          f'{s} {p0.get("terms")} tempB={p0.get("tempBTree")}')
+
+    s, ix, _ = call('POST', f'/v1/databases/collections/{icid}/indexes',
+                    {'key': 'status_total', 'type': 'key', 'attributes': ['status', 'total'], 'orders': ['ASC', 'DESC']})
+    check('indexes', 'create a composite key index',
+          s == 201 and ix.get('status') == 'available', f'{s} {str(ix)[:150]}')
+
+    s, p1, _ = plan('equal("status","paid")')
+    check('indexes', 'the index turns the scan into an index lookup',
+          p1.get('narrowed') is True and p1.get('index') == 'ix_' + icid + '_status_total',
+          f'{p1.get("index")} {p1.get("terms")}')
+
+    # 默认按 createdAt 排序，复合索引 (status,total) 帮不上忙 → 仍需临时 B 树；
+    # 换成 orderDesc("total") 后排序也能由索引满足，这是复合索引真正的价值。
+    s, p1b, _ = plan('equal("status","paid")', 'orderDesc("total")')
+    check('indexes', 'the composite index also satisfies the sort',
+          p1b.get('narrowed') is True and p1b.get('tempBTree') is False,
+          f'{p1b.get("terms")} tempB={p1b.get("tempBTree")}')
+
+    s, p2, _ = plan('greaterThan("total",10)')
+    check('indexes', 'a non-leftmost column cannot use the index alone',
+          p2.get('narrowed') is False, f'{p2.get("terms")}')
+
+    s, uq, _ = call('POST', f'/v1/databases/collections/{icid}/indexes',
+                    {'key': 'uniq_code', 'type': 'unique', 'attributes': ['code']})
+    check('indexes', 'create a unique index', s == 201 and uq.get('status') == 'available', f'{s} {str(uq)[:150]}')
+
+    add_doc({'code': 'A-1'})
+    s, dup, _ = add_doc({'code': 'A-1'})
+    check('indexes', 'unique index rejects the duplicate with a readable error',
+          s == 400 and 'requires unique values' in str(dup.get('error', '')), f'{s} {dup}')
+
+    s, bad, _ = call('POST', f'/v1/databases/collections/{icid}/indexes',
+                     {'key': 'ghost', 'type': 'key', 'attributes': ['nope']})
+    check('indexes', 'indexing an undefined attribute is rejected', s == 400, f'{s} {bad}')
+
+    s, attrs, _ = call('GET', f'/v1/databases/collections/{icid}')
+    code_attr = next((a for a in attrs.get('attributes', []) if a['key'] == 'code'), None)
+    if code_attr:
+        s, r, _ = call('DELETE', f'/v1/databases/collections/{icid}/attributes/{code_attr["id"]}')
+        check('indexes', 'dropping an indexed attribute is refused', s == 400 and 'delete the index first' in str(r.get('error', '')), f'{s} {r}')
+
+    s, lst, _ = call('GET', f'/v1/databases/collections/{icid}/indexes')
+    check('indexes', 'list reports both indexes', s == 200 and len(lst.get('indexes', [])) == 2, f'{len(lst.get("indexes", []))}')
+
+    sid = next((i['id'] for i in lst.get('indexes', []) if i['key'] == 'status_total'), None)
+    if sid:
+        call('DELETE', f'/v1/databases/collections/{icid}/indexes/{sid}')
+        s, p3, _ = plan('equal("status","paid")')
+        check('indexes', 'dropping the index restores the scan', p3.get('narrowed') is False, f'{p3.get("terms")}')
+
+    call('DELETE', f'/v1/databases/collections/{icid}')
+    s, gone, _ = call('GET', f'/v1/databases/collections/{icid}/indexes')
+    check('indexes', 'deleting the collection takes its indexes with it', s == 404, f'{s} {gone}')
 
 # ------------------------------------------------------------------ cleanup
 for path in [f'/v1/functions/{fnid}' if fnid else None,
