@@ -5,6 +5,7 @@ import { api } from '../api';
 import type { Site } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo } from '../lib/format';
+import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
 
@@ -66,7 +67,7 @@ export default function Sites() {
                   }}
                 />
                 <div style={{ position: 'absolute', top: 9, left: 9, display: 'flex', gap: 6 }}>
-                  <Badge tone={statusTone(s.status)} dot>{s.status}</Badge>
+                  <Badge tone={statusTone(s.status)} dot>{t(statusLabel(s.status))}</Badge>
                 </div>
               </div>
               <div style={{ padding: '13px 15px' }}>

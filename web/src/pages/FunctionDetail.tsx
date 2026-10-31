@@ -10,6 +10,7 @@ import type { Execution, FunctionDef } from '../types';
 import CodeEditor from '../components/CodeEditor';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDuration, statusTone, timeAgo, fmtDateTime } from '../lib/format';
+import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
 import DomainsTab from '../components/DomainsTab';
@@ -174,7 +175,7 @@ export default function FunctionDetail() {
               <span className="card-title">{t('Execution output')}</span>
               {result && (
                 <>
-                  <Badge tone={statusTone(result.status)} dot>{result.status}</Badge>
+                  <Badge tone={statusTone(result.status)} dot>{t(statusLabel(result.status))}</Badge>
                   <span className="tiny dim mono">{fmtDuration(result.duration)}</span>
                   {result.statusCode && <span className="tiny dim mono">HTTP {result.statusCode}</span>}
                 </>

@@ -5,6 +5,7 @@ import { api } from '../api';
 import type { Execution, FunctionDef } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo, fmtDuration } from '../lib/format';
+import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
 
@@ -107,7 +108,7 @@ export default function Functions() {
                     <td>
                       {f.lastExecution ? (
                         <div className="flex" style={{ gap: 7 }}>
-                          <Badge tone={statusTone(f.lastExecution.status)} dot>{f.lastExecution.status}</Badge>
+                          <Badge tone={statusTone(f.lastExecution.status)} dot>{t(statusLabel(f.lastExecution.status))}</Badge>
                           <span className="tiny dim">{timeAgo(f.lastExecution.createdAt)}</span>
                         </div>
                       ) : <span className="tiny dim">{t('never')}</span>}
@@ -137,7 +138,7 @@ export default function Functions() {
                 {execs.slice(0, 6).map((e) => (
                   <tr key={e.id} className="pointer" onClick={() => nav(`/functions/${e.functionId}`)}>
                     <td className="cell-main">{e.functionName}</td>
-                    <td><Badge tone={statusTone(e.status)} dot>{e.status}</Badge></td>
+                    <td><Badge tone={statusTone(e.status)} dot>{t(statusLabel(e.status))}</Badge></td>
                     <td className="dim tiny">{t(triggerLabel(e.triggerType))}</td>
                     <td className="right mono dim">{fmtDuration(e.duration)}</td>
                     <td className="right dim tiny">{timeAgo(e.createdAt)}</td>

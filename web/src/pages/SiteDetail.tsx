@@ -9,6 +9,7 @@ import type { Site, SiteFile } from '../types';
 import CodeEditor from '../components/CodeEditor';
 import { Badge, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo } from '../lib/format';
+import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
 
@@ -125,7 +126,7 @@ export default function SiteDetail() {
               <span>·</span><span>{site.framework}</span>
             </div>
           </div>
-          <Badge tone={statusTone(site.status)} dot>{site.status}</Badge>
+          <Badge tone={statusTone(site.status)} dot>{t(statusLabel(site.status))}</Badge>
           {dirty && <Badge tone="amber">{t('saving…')}</Badge>}
         </div>
         <div className="page-actions">

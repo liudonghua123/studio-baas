@@ -4,6 +4,7 @@ import { api } from '../api';
 import type { Message } from '../types';
 import { Badge, Empty, Loading, useToast } from '../components/ui';
 import { fmtDateTime, statusTone, timeAgo } from '../lib/format';
+import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
 
@@ -103,7 +104,7 @@ export default function Messaging() {
                     <div className="flex" style={{ gap: 8 }}>
                       <Badge tone={m.channel === 'email' ? 'blue' : m.channel === 'sms' ? 'violet' : 'amber'}>{m.channel}</Badge>
                       <span className="tiny" style={{ color: 'var(--muted)' }}>{m.recipient}</span>
-                      <span style={{ marginLeft: 'auto' }}><Badge tone={statusTone(m.status)} dot>{m.status}</Badge></span>
+                      <span style={{ marginLeft: 'auto' }}><Badge tone={statusTone(m.status)} dot>{t(statusLabel(m.status))}</Badge></span>
                     </div>
                     {m.subject && <div style={{ fontSize: 12, fontWeight: 550, marginTop: 6 }}>{m.subject}</div>}
                     <div className="tiny dim" style={{ marginTop: 2, whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{m.body}</div>

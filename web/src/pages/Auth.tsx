@@ -4,6 +4,7 @@ import { api } from '../api';
 import type { User } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDate, initials, statusTone, timeAgo } from '../lib/format';
+import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
 
@@ -118,7 +119,7 @@ export default function Auth() {
                         </div>
                       </div>
                     </td>
-                    <td><Badge tone={statusTone(u.status)} dot>{u.status}</Badge></td>
+                    <td><Badge tone={statusTone(u.status)} dot>{t(statusLabel(u.status))}</Badge></td>
                     <td>
                       <div className="flex" style={{ gap: 4, flexWrap: 'wrap' }}>
                         {u.labels.length ? u.labels.map((l) => <Badge key={l} tone="violet">{l}</Badge>) : <span className="dim tiny">—</span>}
@@ -176,7 +177,7 @@ export default function Auth() {
           <>
             <dl className="kv" style={{ marginBottom: 16 }}>
               <dt>{t('User ID')}</dt><dd className="mono">{editing.id}</dd>
-              <dt>{t('Status')}</dt><dd><Badge tone={statusTone(editing.status)}>{editing.status}</Badge></dd>
+              <dt>{t('Status')}</dt><dd><Badge tone={statusTone(editing.status)}>{t(statusLabel(editing.status))}</Badge></dd>
               <dt>{t('Verified')}</dt><dd>{editing.emailVerified ? t('Yes') : t('No')}</dd>
               <dt>{t('Created')}</dt><dd>{fmtDate(editing.createdAt)}</dd>
               <dt>{t('Last login')}</dt><dd>{timeAgo(editing.lastLoginAt)}</dd>

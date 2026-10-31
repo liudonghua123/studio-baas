@@ -75,4 +75,13 @@ export const zhAuth: Dict = {
   Service: '服务',
   Time: '时间',
   Core: '核心',
+
+  Active: '活跃',
+  Unverified: '未验证',
+  Blocked: '已封禁',
+
+  Sent: '已发送',
+  Delivered: '已投递',
+  Failed: '失败',
+  Queued: '排队中',
 };

@@ -189,4 +189,14 @@ export const zhShell: Dict = {
   'in {m}m': '{m} 分钟后',
   'in {h}h {mm}m': '{h} 小时 {mm} 分钟后',
   'in {d}d {hh}h': '{d} 天 {hh} 小时后',
+
+  /* ------------------------------------------------- resource statuses */
+  Ready: '就绪',
+  Draft: '草稿',
+  Building: '构建中',
+  Deployed: '已部署',
+  Published: '已发布',
+  Completed: '完成',
+  Running: '运行中',
+  'Timed out': '超时',
 };
