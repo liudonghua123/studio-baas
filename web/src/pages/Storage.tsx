@@ -75,7 +75,7 @@ export default function Storage() {
         <div>
           <div className="eyebrow"><FolderOpen size={11} /> Storage</div>
           <h1>Buckets & files</h1>
-          <p>Encrypted object storage with compression, image transformations and granular access control.</p>
+          <p>Object storage with per-bucket limits, extensions and access policy. 加密/压缩仅作策略记录，文件实际以明文存放在本地磁盘。</p>
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={() => { load(); loadFiles(active); }}><RefreshCw size={14} /> Refresh</button>
@@ -113,12 +113,12 @@ export default function Storage() {
               <div className="stat">
                 <div className="stat-label"><Lock size={12} /> Encryption</div>
                 <div className="stat-value" style={{ fontSize: 21 }}>{active.encryption ? 'AES-256' : 'Off'}</div>
-                <div className="stat-foot">at rest & in transit</div>
+                <div className="stat-foot">policy only · stored as plain files</div>
               </div>
               <div className="stat">
                 <div className="stat-label"><Wand2 size={12} /> Compression</div>
                 <div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize' }}>{active.compression}</div>
-                <div className="stat-foot">{active.imageTransform ? 'image transforms enabled' : 'transforms disabled'}</div>
+                <div className="stat-foot">{active.imageTransform ? 'policy only · no server-side transform' : 'transforms disabled'}</div>
               </div>
             </div>
           )}

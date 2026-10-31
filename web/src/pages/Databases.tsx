@@ -40,6 +40,7 @@ export default function Databases() {
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonText, setJsonText] = useState('{}');
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [confirm, setConfirm] = useState<{ type: 'collection' | 'doc'; id: string; name: string } | null>(null);
   const LIMIT = 10;
 
@@ -91,6 +92,26 @@ export default function Databases() {
 
   const saveDoc = async () => {
     if (!active) return;
+    // 提交前先做一遍必填/类型校验：避免为了一个空字段往返一次服务器，
+    // 也把错误定位到具体输入框而不是只弹一条 toast
+    if (!jsonMode) {
+      const errs: Record<string, string> = {};
+      for (const a of active.attributes || []) {
+        const v = docData[a.key];
+        const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
+        if (a.required && empty) errs[a.key] = 'This field is required';
+        else if (!empty && (a.type === 'integer' || a.type === 'float') && !Number.isFinite(Number(v))) {
+          errs[a.key] = a.type === 'integer' ? 'Must be a whole number' : 'Must be a number';
+        } else if (!empty && a.type === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v))) {
+          errs[a.key] = 'Must be a valid email';
+        }
+      }
+      setFieldErrors(errs);
+      if (Object.keys(errs).length) {
+        toast.push(`${Object.keys(errs).length} field(s) need attention`, 'err');
+        return;
+      }
+    }
     setSaving(true);
     try {
       let payload = docData;
@@ -355,7 +376,7 @@ export default function Databases() {
 
       {/* document drawer */}
       <Drawer
-        open={!!docDrawer} onClose={() => setDocDrawer(null)}
+        open={!!docDrawer} onClose={() => { setDocDrawer(null); setFieldErrors({}); }}
         title={editing ? 'Edit document' : 'New document'}
         subtitle={active ? `${active.name} · ${active.key}` : ''}
         footer={<>
@@ -378,7 +399,18 @@ export default function Databases() {
           <textarea className="textarea mono" style={{ minHeight: 320, fontSize: 12 }} value={jsonText} onChange={(e) => setJsonText(e.target.value)} />
         ) : (
           active?.attributes?.map((a) => (
-            <DocField key={a.id} attr={a} value={docData[a.key]} onChange={(v) => setDocData((d) => ({ ...d, [a.key]: v }))} />
+            <div key={a.id}>
+              <DocField attr={a} value={docData[a.key]} error={fieldErrors[a.key]}
+                onChange={(v) => {
+                  setDocData((d) => ({ ...d, [a.key]: v }));
+                  if (fieldErrors[a.key]) setFieldErrors((e) => { const n = { ...e }; delete n[a.key]; return n; });
+                }} />
+              {fieldErrors[a.key] && (
+                <div className="tiny" style={{ color: '#ff6b6b', marginTop: 2, marginBottom: 12 }}>
+                  {fieldErrors[a.key]}
+                </div>
+              )}
+            </div>
           ))
         )}
         {!active?.attributes?.length && <div className="hint">This collection has no attributes. Use JSON mode to store arbitrary data.</div>}
@@ -401,7 +433,7 @@ export default function Databases() {
   );
 }
 
-function DocField({ attr, value, onChange }: { attr: Attribute; value: any; onChange: (v: any) => void }) {
+function DocField({ attr, value, onChange, error }: { attr: Attribute; value: any; onChange: (v: any) => void; error?: string }) {
   const I = TYPE_ICON[attr.type] || Type;
   if (attr.type === 'boolean') {
     return (
