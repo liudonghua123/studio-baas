@@ -1,0 +1,558 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { db, now, uid, UPLOAD_DIR } from './db.js';
+
+/* --------------------------------------------------------------- helpers */
+
+const svgArt = (a: string, b: string, label: string, shape: 'orb' | 'wave' | 'grid' | 'ring', i: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+<defs>
+  <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>
+  <radialGradient id="r" cx="30%" cy="25%" r="80%"><stop offset="0" stop-color="#ffffff" stop-opacity=".55"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+  <filter id="blur"><feGaussianBlur stdDeviation="28"/></filter>
+</defs>
+<rect width="800" height="800" fill="url(#g)"/>
+<g filter="url(#blur)" opacity=".55">
+  <circle cx="620" cy="180" r="180" fill="#ffffff" opacity=".35"/>
+  <circle cx="180" cy="650" r="200" fill="#000000" opacity=".18"/>
+</g>
+${shape === 'orb' ? `<circle cx="400" cy="380" r="200" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2"/><circle cx="400" cy="380" r="120" fill="rgba(255,255,255,.22)"/>` : ''}
+${shape === 'wave' ? `<path d="M-40 470 C 160 330, 300 610, 470 470 S 720 330, 860 470" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="3"/><path d="M-40 540 C 160 400, 300 680, 470 540 S 720 400, 860 540" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2"/>` : ''}
+${shape === 'grid' ? `<g stroke="rgba(255,255,255,.22)">${Array.from({ length: 7 }, (_, k) => `<line x1="${90 + k * 100}" y1="120" x2="${90 + k * 100}" y2="680"/>`).join('')}${Array.from({ length: 7 }, (_, k) => `<line x1="90" y1="${120 + k * 90}" x2="710" y2="${120 + k * 90}"/>`).join('')}</g><rect x="300" y="280" width="200" height="200" rx="36" fill="rgba(255,255,255,.22)"/>` : ''}
+${shape === 'ring' ? `<g fill="none" stroke="rgba(255,255,255,.5)"><circle cx="400" cy="400" r="230" stroke-width="1.5"/><circle cx="400" cy="400" r="170" stroke-width="1.5"/><circle cx="400" cy="400" r="110" stroke-width="1.5"/></g><circle cx="400" cy="400" r="60" fill="rgba(255,255,255,.5)"/>` : ''}
+<text x="60" y="720" font-family="ui-sans-serif,Inter,system-ui" font-size="34" font-weight="700" fill="rgba(255,255,255,.92)" letter-spacing="-1">${label}</text>
+<text x="60" y="756" font-family="ui-monospace,monospace" font-size="18" fill="rgba(255,255,255,.65)">AURORA / ${String(i).padStart(2, '0')}</text>
+</svg>`;
+
+/* ------------------------------------------------------------ seed flags */
+
+export function seed() {
+  const project = db.prepare('SELECT * FROM projects LIMIT 1').get() as any;
+  if (project) return false;
+
+  db.prepare('INSERT INTO projects (id,name,region,plan,createdAt) VALUES (?,?,?,?,?)').run(
+    'studio', 'Aurora Commerce', 'fra', 'pro', now(),
+  );
+  db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('ai_model', 'deepseek-chat');
+
+  /* --------------------------------------------------------- collections */
+  const cols = [
+    { id: 'col_products', name: 'Products', key: 'products', icon: 'package', color: '#6C5CE7' },
+    { id: 'col_orders', name: 'Orders', key: 'orders', icon: 'shopping-bag', color: '#FD366E' },
+    { id: 'col_customers', name: 'Customers', key: 'customers', icon: 'users', color: '#00B894' },
+    { id: 'col_posts', name: 'Posts', key: 'posts', icon: 'file-text', color: '#0984E3' },
+  ];
+  for (const c of cols) {
+    db.prepare('INSERT INTO collections (id,name,key,icon,color,documentSecurity,enabled,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(c.id, c.name, c.key, c.icon, c.color, 0, 1, now(), now());
+  }
+
+  const attr = (col: string, key: string, type: string, required = 0, extra: Partial<{ size: number; elements: string[]; array: boolean }> = {}) => {
+    db.prepare('INSERT INTO attributes (id,collectionId,key,type,required,array,size,defaultVal,elements,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(uid('attr_'), col, key, type, required, extra.array ? 1 : 0, extra.size ?? null, null,
+        JSON.stringify(extra.elements ?? []), now());
+  };
+
+  attr('col_products', 'name', 'string', 1, { size: 128 });
+  attr('col_products', 'sku', 'string', 1, { size: 32 });
+  attr('col_products', 'price', 'float', 1);
+  attr('col_products', 'stock', 'integer', 1);
+  attr('col_products', 'category', 'enum', 1, { elements: ['Apparel', 'Accessories', 'Home', 'Audio'] });
+  attr('col_products', 'status', 'enum', 1, { elements: ['active', 'draft', 'archived'] });
+  attr('col_products', 'description', 'text');
+  attr('col_products', 'image', 'string');
+
+  attr('col_orders', 'customer', 'string', 1);
+  attr('col_orders', 'email', 'email', 1);
+  attr('col_orders', 'total', 'float', 1);
+  attr('col_orders', 'items', 'integer', 1);
+  attr('col_orders', 'status', 'enum', 1, { elements: ['pending', 'paid', 'shipped', 'refunded'] });
+  attr('col_orders', 'notes', 'text');
+
+  attr('col_customers', 'name', 'string', 1);
+  attr('col_customers', 'email', 'email', 1);
+  attr('col_customers', 'tier', 'enum', 1, { elements: ['free', 'plus', 'pro'] });
+  attr('col_customers', 'country', 'string');
+  attr('col_customers', 'ltv', 'float');
+  attr('col_customers', 'joined', 'datetime');
+
+  attr('col_posts', 'title', 'string', 1);
+  attr('col_posts', 'slug', 'string', 1);
+  attr('col_posts', 'author', 'string', 1);
+  attr('col_posts', 'status', 'enum', 1, { elements: ['published', 'draft'] });
+  attr('col_posts', 'views', 'integer');
+  attr('col_posts', 'excerpt', 'text');
+
+  /* -------------------------------------------------------------- buckets */
+  db.prepare('INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt) VALUES (?,?,?,?,?,?,?,?)')
+    .run('bkt_media', 'Product media', 10485760, JSON.stringify(['png', 'jpg', 'jpeg', 'svg', 'webp']), 'gzip', 1, 1, now());
+  db.prepare('INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt) VALUES (?,?,?,?,?,?,?,?)')
+    .run('bkt_docs', 'Documents', 5242880, JSON.stringify(['pdf', 'md', 'txt']), 'none', 1, 0, now());
+
+  /* ---------------------------------------------------------------- files */
+  const arts: [string, string, string, 'orb' | 'wave' | 'grid' | 'ring'][] = [
+    ['#FDCB6E', '#E17055', 'Sunset Hoodie', 'wave'],
+    ['#6C5CE7', '#00CEC9', 'Nebula Lamp', 'orb'],
+    ['#FD366E', '#6C5CE7', 'Pulse Speaker', 'ring'],
+    ['#00B894', '#0984E3', 'Tidal Bottle', 'grid'],
+    ['#E17055', '#FDCB6E', 'Clay Mug Set', 'orb'],
+    ['#0984E3', '#6C5CE7', 'Aurora Tote', 'wave'],
+  ];
+  const fileIds: string[] = [];
+  arts.forEach(([a, b, label, shape], i) => {
+    const id = 'file_art' + (i + 1);
+    const svg = svgArt(a, b, label, shape, i + 1);
+    const p = path.join(UPLOAD_DIR, id + '.svg');
+    fs.writeFileSync(p, svg);
+    db.prepare('INSERT INTO files (id,bucketId,name,mimeType,size,path,createdAt) VALUES (?,?,?,?,?,?,?)')
+      .run(id, 'bkt_media', label.toLowerCase().replace(/\s+/g, '-') + '.svg', 'image/svg+xml', svg.length, p,
+        new Date(Date.now() - (i + 1) * 3600_000).toISOString());
+    fileIds.push(id);
+  });
+
+  /* ------------------------------------------------------------ documents */
+  const products = [
+    ['Aurora Hoodie', 'AUR-HD-001', 148, 42, 'Apparel', 'active', 'Heavyweight organic cotton hoodie with tonal embroidery.'],
+    ['Nebula Desk Lamp', 'AUR-LP-002', 219, 18, 'Home', 'active', 'Dimmable ambient lamp with a hand-blown glass orb.'],
+    ['Pulse Speaker', 'AUR-SP-003', 329, 7, 'Audio', 'active', '360° sound with a machined aluminium body.'],
+    ['Tidal Bottle', 'AUR-BT-004', 54, 120, 'Accessories', 'active', 'Vacuum insulated bottle, 24h cold / 12h hot.'],
+    ['Clay Mug Set', 'AUR-MG-005', 72, 34, 'Home', 'active', 'Set of two stoneware mugs with reactive glaze.'],
+    ['Aurora Tote', 'AUR-TT-006', 96, 61, 'Accessories', 'active', 'Waxed canvas tote with leather handles.'],
+    ['Studio Cap', 'AUR-CP-007', 42, 0, 'Apparel', 'archived', 'Six-panel cap with a woven tonal label.'],
+    ['Drift Runner', 'AUR-SH-008', 186, 22, 'Apparel', 'active', 'Everyday trainer with a recycled knit upper.'],
+    ['Orbit Stand', 'AUR-ST-009', 88, 15, 'Accessories', 'draft', 'Magnetic stand for phone and tablet.'],
+    ['Halo Charger', 'AUR-CH-010', 129, 48, 'Audio', 'active', '15W wireless charging pad with braided cable.'],
+    ['Lumen Diffuser', 'AUR-DF-011', 114, 9, 'Home', 'active', 'Ultrasonic diffuser with a 6-hour reservoir.'],
+    ['Echo Cable', 'AUR-CB-012', 28, 210, 'Accessories', 'active', 'USB-C to USB-C, 100W, 2m braided.'],
+  ];
+  const insDoc = db.prepare('INSERT INTO documents (id,collectionId,data,permissions,createdAt,updatedAt) VALUES (?,?,?,?,?,?)');
+  products.forEach((p, i) => {
+    const t = new Date(Date.now() - (products.length - i) * 86400_000 * 2).toISOString();
+    insDoc.run(uid('doc_'), 'col_products', JSON.stringify({
+      name: p[0], sku: p[1], price: p[2], stock: p[3], category: p[4], status: p[5],
+      description: p[6], image: fileIds[i % fileIds.length],
+    }), JSON.stringify(['read("any")', 'update("users")', 'delete("users")']), t, t);
+  });
+
+  const orders = [
+    ['Mia Fischer', 'mia@northwind.io', 476, 3, 'paid', 'Express shipping'],
+    ['Lukas Brandt', 'lukas@fieldkit.co', 219, 1, 'shipped', ''],
+    ['Ava Laurent', 'ava@studioform.fr', 96, 1, 'paid', 'Gift wrap'],
+    ['Noah Weber', 'noah@weber.dev', 858, 4, 'pending', 'Invoice to company'],
+    ['Sofia Rossi', 'sofia@atelier.it', 54, 1, 'refunded', 'Damaged in transit'],
+    ['Elias Novak', 'elias@nova.cz', 329, 1, 'paid', ''],
+    ['Emma Jensen', 'emma@fjord.dk', 300, 2, 'shipped', 'Leave at reception'],
+    ['Jonas Meyer', 'jonas@meyer.de', 186, 1, 'paid', ''],
+  ];
+  orders.forEach((o, i) => {
+    const t = new Date(Date.now() - i * 36 * 3600_000).toISOString();
+    insDoc.run(uid('doc_'), 'col_orders', JSON.stringify({
+      customer: o[0], email: o[1], total: o[2], items: o[3], status: o[4], notes: o[5],
+    }), JSON.stringify(['read("users")', 'update("users")', 'delete("users")']), t, t);
+  });
+
+  const customers = [
+    ['Mia Fischer', 'mia@northwind.io', 'pro', 'Germany', 4820],
+    ['Lukas Brandt', 'lukas@fieldkit.co', 'plus', 'Austria', 1260],
+    ['Ava Laurent', 'ava@studioform.fr', 'plus', 'France', 2140],
+    ['Noah Weber', 'noah@weber.dev', 'free', 'Germany', 380],
+    ['Sofia Rossi', 'sofia@atelier.it', 'pro', 'Italy', 6310],
+    ['Elias Novak', 'elias@nova.cz', 'free', 'Czechia', 129],
+  ];
+  customers.forEach((c, i) => {
+    const t = new Date(Date.now() - (i + 2) * 86400_000 * 30).toISOString();
+    insDoc.run(uid('doc_'), 'col_customers', JSON.stringify({
+      name: c[0], email: c[1], tier: c[2], country: c[3], ltv: c[4], joined: t.slice(0, 10),
+    }), JSON.stringify(['read("users")', 'update("users")', 'delete("users")']), t, t);
+  });
+
+  const posts = [
+    ['Designing for calm interfaces', 'designing-for-calm', 'Ava Laurent', 'published', 2841],
+    ['Behind the Aurora Hoodie', 'behind-the-hoodie', 'Mia Fischer', 'published', 1912],
+    ['The 2026 material report', 'material-report-2026', 'Noah Weber', 'draft', 0],
+  ];
+  posts.forEach((p, i) => {
+    const t = new Date(Date.now() - (i + 1) * 86400_000 * 5).toISOString();
+    insDoc.run(uid('doc_'), 'col_posts', JSON.stringify({
+      title: p[0], slug: p[1], author: p[2], status: p[3], views: p[4],
+      excerpt: 'Notes from the studio on building products that feel quiet, useful and enduring.',
+    }), JSON.stringify(['read("any")', 'update("users")', 'delete("users")']), t, t);
+  });
+
+  /* ------------------------------------------------------------- functions */
+  const fnOrder = `export default async ({ req, res, log, error, databases, env }) => {
+  const body = req.body || {};
+  log('Received order webhook', body);
+
+  if (!body.email || !Array.isArray(body.items) || body.items.length === 0) {
+    error('Invalid payload: email and items[] are required');
+    return res.json({ ok: false, message: 'email and items[] are required' });
+  }
+
+  const subtotal = body.items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1), 0);
+  const tier = body.tier || 'free';
+  const discountRate = tier === 'pro' ? 0.15 : tier === 'plus' ? 0.08 : 0;
+  const total = Math.round(subtotal * (1 - discountRate) * 100) / 100;
+
+  const doc = databases.createDocument('orders', {
+    customer: body.customer || 'Guest',
+    email: body.email,
+    total,
+    items: body.items.length,
+    status: 'pending',
+    notes: discountRate > 0 ? 'Applied ' + discountRate * 100 + '% ' + tier + ' discount' : '',
+  });
+
+  log('Order created:', doc.id, 'total:', total);
+
+  return res.json({
+    ok: true,
+    orderId: doc.id,
+    subtotal,
+    discountRate,
+    total,
+    currency: env.CURRENCY || 'EUR',
+    processedAt: new Date().toISOString(),
+  });
+};`;
+
+  const fnStats = `export default async ({ res, log, databases }) => {
+  const products = databases.listDocuments('products', { limit: 100 });
+  const orders = databases.listDocuments('orders', { limit: 100 });
+
+  const revenue = orders.documents.reduce((sum, o) => sum + Number(o.data.total || 0), 0);
+  const lowStock = products.documents
+    .filter((p) => Number(p.data.stock) < 10)
+    .map((p) => ({ name: p.data.name, stock: p.data.stock }));
+
+  const byCategory = products.documents.reduce((acc, p) => {
+    acc[p.data.category] = (acc[p.data.category] || 0) + 1;
+    return acc;
+  }, {});
+
+  log('Aggregated', products.total, 'products and', orders.total, 'orders');
+
+  return res.json({
+    revenue: Math.round(revenue * 100) / 100,
+    orders: orders.total,
+    products: products.total,
+    lowStock,
+    byCategory,
+  });
+};`;
+
+  const fnHealth = `import { randomUUID } from 'node:crypto';
+
+export default async ({ req, res, log, env }) => {
+  const started = Date.now();
+  const id = randomUUID();
+
+  log('Health probe', id);
+  log('Region:', env.REGION || 'fra');
+
+  return res.json({
+    id,
+    status: 'healthy',
+    region: env.REGION || 'fra',
+    runtime: 'node-22',
+    uptimeMs: Date.now() - started,
+    requestId: req.headers['x-request-id'] || null,
+  });
+};`;
+
+  const fns: [string, string, string, string, Record<string, string>, string][] = [
+    ['Order webhook', 'fn_order', fnOrder, '0 */6 * * *', { CURRENCY: 'EUR', REGION: 'fra' }, 'Validates incoming orders, applies tier discounts and writes them to the Orders collection.'],
+    ['Store analytics', 'fn_stats', fnStats, '', { REGION: 'fra' }, 'Aggregates revenue, order volume and low-stock products across collections.'],
+    ['Health probe', 'fn_health', fnHealth, '*/15 * * * *', { REGION: 'fra', LOG_LEVEL: 'info' }, 'Lightweight uptime probe used by the status page.'],
+  ];
+  for (const [name, id, code, schedule, env, description] of fns) {
+    const t = new Date(Date.now() - Math.random() * 5 * 86400_000).toISOString();
+    db.prepare(`INSERT INTO functions (id,name,runtime,entrypoint,code,schedule,timeout,env,enabled,executeAccess,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, name, 'node-22', 'src/main.js', code, schedule, 15, JSON.stringify(env), 1, 'any', t, t,
+    );
+    db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING')
+      .run('fn_desc_' + id, description);
+  }
+
+  /* ---------------------------------------------------------------- sites */
+  const siteFiles = siteSeed();
+  const t0 = new Date(Date.now() - 12 * 86400_000).toISOString();
+  db.prepare(`INSERT INTO sites (id,name,framework,domain,entrypoint,buildCommand,files,status,buildLogs,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'site_aurora', 'aurora-storefront', 'static', 'aurora.studio.app', 'index.html', 'vite build',
+    JSON.stringify(siteFiles), 'ready',
+    JSON.stringify(['✓ 4 files uploaded', '✓ Build completed in 1.24s', '✓ Live at aurora.studio.app']), t0, now(),
+  );
+
+  const t1 = new Date(Date.now() - 6 * 86400_000).toISOString();
+  db.prepare(`INSERT INTO sites (id,name,framework,domain,entrypoint,buildCommand,files,status,buildLogs,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'site_docs', 'product-docs', 'static', 'docs.studio.app', 'index.html', 'vite build',
+    JSON.stringify([{ path: 'index.html', content: '<!doctype html><html><head><meta charset="utf-8"><title>Docs</title><style>body{font-family:ui-sans-serif,system-ui;background:#0b0b0f;color:#e7e7ee;padding:64px;max-width:760px;margin:auto}h1{font-size:44px;letter-spacing:-.03em}code{background:#1b1b24;padding:2px 6px;border-radius:6px}</style></head><body><h1>Product API</h1><p>Query your collections over REST with <code>/v1/databases/collections/:id/documents</code>.</p><p>Tip: open the Sites editor and change this page live.</p></body></html>' }]),
+    'ready', JSON.stringify(['✓ Deployed']), t1, t1,
+  );
+
+  /* ---------------------------------------------------------------- users */
+  const usersData = [
+    ['Mia Fischer', 'mia@northwind.io', 'active', 1, ['vip', 'beta']],
+    ['Lukas Brandt', 'lukas@fieldkit.co', 'active', 1, ['beta']],
+    ['Ava Laurent', 'ava@studioform.fr', 'active', 1, ['design']],
+    ['Noah Weber', 'noah@weber.dev', 'unverified', 0, []],
+    ['Sofia Rossi', 'sofia@atelier.it', 'active', 1, ['vip']],
+    ['Elias Novak', 'elias@nova.cz', 'blocked', 1, []],
+  ];
+  usersData.forEach((u, i) => {
+    const t = new Date(Date.now() - (i + 1) * 12 * 86400_000).toISOString();
+    db.prepare('INSERT INTO users (id,name,email,passwordHash,status,emailVerified,labels,prefs,createdAt,lastLoginAt) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(uid('usr_'), u[0] as string, u[1] as string,
+        crypto.scryptSync('aurora-demo', 'studio-salt', 32).toString('hex'),
+        u[2] as string, u[3] as number, JSON.stringify(u[4]), JSON.stringify({ theme: 'dark' }), t,
+        new Date(Date.now() - i * 3600_000 * 6).toISOString());
+  });
+
+  /* ------------------------------------------------------------- messages */
+  const msgs = [
+    ['email', 'mia@northwind.io', 'Your order shipped', 'Order #1042 is on its way.'],
+    ['push', 'lukas@fieldkit.co', 'Back in stock', 'The Nebula Desk Lamp is available again.'],
+    ['sms', '+4915112345678', '', 'Your verification code is 481923.'],
+  ];
+  msgs.forEach((m, i) => {
+    db.prepare('INSERT INTO messages (id,channel,recipient,subject,body,status,createdAt) VALUES (?,?,?,?,?,?,?)').run(
+      uid('msg_'), m[0], m[1], m[2], m[3], i === 2 ? 'delivered' : 'sent',
+      new Date(Date.now() - i * 5 * 3600_000).toISOString(),
+    );
+  });
+
+  /* -------------------------------------------------------------- api keys */
+  db.prepare('INSERT INTO apiKeys (id,name,scopes,secret,lastUsedAt,createdAt) VALUES (?,?,?,?,?,?)').run(
+    'key_web', 'Storefront (web)', JSON.stringify(['databases.read', 'databases.write', 'storage.read']),
+    'standard_' + crypto.randomBytes(12).toString('hex'),
+    new Date(Date.now() - 3600_000).toISOString(), new Date(Date.now() - 20 * 86400_000).toISOString(),
+  );
+
+  /* ------------------------------------------------------- historical logs */
+  const paths = [
+    ['GET', '/v1/databases/collections/products/documents', 'databases', 200],
+    ['POST', '/v1/databases/collections/orders/documents', 'databases', 201],
+    ['GET', '/v1/storage/buckets/bkt_media/files', 'storage', 200],
+    ['POST', '/v1/functions/fn_order/executions', 'functions', 200],
+    ['GET', '/v1/users', 'auth', 200],
+    ['POST', '/v1/account/sessions', 'auth', 201],
+    ['GET', '/v1/sites/site_aurora', 'sites', 200],
+    ['POST', '/v1/messaging/messages', 'messaging', 201],
+    ['GET', '/v1/databases/collections/posts/documents', 'databases', 200],
+    ['POST', '/v1/functions/fn_stats/executions', 'functions', 200],
+  ];
+  const insertLog = db.prepare('INSERT INTO logs (id,method,path,status,duration,service,ip,createdAt) VALUES (?,?,?,?,?,?,?,?)');
+  for (let d = 13; d >= 0; d--) {
+    const dayBase = 420 + Math.round(Math.sin(d / 2) * 120) + (13 - d) * 18;
+    const count = d === 0 ? Math.round(dayBase * 0.55) : dayBase;
+    for (let k = 0; k < count; k++) {
+      const p = paths[Math.floor(Math.random() * paths.length)];
+      const err = Math.random() < 0.012;
+      const ts = new Date(Date.now() - d * 86400_000 + Math.floor(Math.random() * 20 * 3600_000)).toISOString();
+      insertLog.run(uid('log_'), p[0], p[1], err ? (Math.random() < 0.5 ? 500 : 404) : p[3],
+        Math.round(8 + Math.random() * 90), p[2], '10.0.' + Math.floor(Math.random() * 255) + '.' + Math.floor(Math.random() * 255), ts);
+    }
+  }
+
+  /* ---------------------------------------------------------- executions */
+  const execIns = db.prepare('INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt) VALUES (?,?,?,?,?,?,?,?,?)');
+  for (let i = 0; i < 18; i++) {
+    const fnId = ['fn_order', 'fn_stats', 'fn_health'][i % 3];
+    const failed = i === 7;
+    execIns.run(uid('exec_'), fnId, failed ? 'failed' : 'completed', i % 3 === 0 ? 'schedule' : 'manual',
+      Math.round(30 + Math.random() * 220),
+      JSON.stringify(failed ? ['Function invoked', 'ERROR upstream timeout'] : ['Function invoked', 'Completed successfully']),
+      JSON.stringify(failed ? null : { ok: true }), failed ? JSON.stringify(['upstream timeout']) : JSON.stringify([]),
+      new Date(Date.now() - i * 3 * 3600_000).toISOString());
+  }
+
+  return true;
+}
+
+/* ------------------------------------------------------------ site content */
+
+function siteSeed() {
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aurora — Everyday objects, quietly extraordinary</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="nav">
+    <a class="brand" href="#"><span class="dot"></span> aurora</a>
+    <nav>
+      <a href="#shop">Shop</a>
+      <a href="#story">Story</a>
+      <a href="#news">Journal</a>
+    </nav>
+    <button class="cart" id="cart">Bag <span id="count">0</span></button>
+  </header>
+
+  <section class="hero">
+    <p class="eyebrow">Collection 04 — Winter light</p>
+    <h1>Everyday objects,<br /><em>quietly</em> extraordinary.</h1>
+    <p class="lede">A small studio in Berlin making considered pieces for the home and the body. Built to be used, not admired from a shelf.</p>
+    <div class="cta">
+      <a class="btn primary" href="#shop">Explore the collection</a>
+      <a class="btn ghost" href="#story">Our story →</a>
+    </div>
+    <div class="meta">
+      <span>Free EU shipping</span><span>·</span><span>30-day returns</span><span>·</span><span>Made in small batches</span>
+    </div>
+  </section>
+
+  <section id="shop" class="shop">
+    <div class="section-head">
+      <h2>Selected pieces</h2>
+      <p>Six objects, one idea: less, but better.</p>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section id="story" class="story">
+    <div>
+      <p class="eyebrow">The studio</p>
+      <h2>We design for the<br />second glance.</h2>
+    </div>
+    <p>Everything begins with a material question. How does it age? How does it feel at 7am? We prototype slowly, produce in small runs, and keep every object repairable.</p>
+  </section>
+
+  <footer>
+    <div class="brand"><span class="dot"></span> aurora</div>
+    <p>© 2026 Aurora Studio — Berlin</p>
+    <p class="tiny">Deployed with Appwrite Sites</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>`;
+
+  const css = `:root {
+  --bg: #0a0a0c;
+  --ink: #f4f2ee;
+  --muted: #a0a0ab;
+  --line: rgba(255,255,255,.12);
+  --accent: #d8ff6b;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.grain { position: fixed; inset: 0; pointer-events: none; opacity: .22; z-index: 9;
+  background-image: radial-gradient(rgba(255,255,255,.08) 1px, transparent 0);
+  background-size: 3px 3px; }
+.nav { display: flex; align-items: center; justify-content: space-between;
+  padding: 26px 48px; border-bottom: 1px solid var(--line); position: sticky; top: 0;
+  backdrop-filter: blur(18px); background: rgba(10,10,12,.72); z-index: 10; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.02em;
+  font-size: 20px; color: var(--ink); text-decoration: none; }
+.dot { width: 12px; height: 12px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #fff, var(--accent) 55%, #6b8f00);
+  box-shadow: 0 0 18px rgba(216,255,107,.55); }
+nav { display: flex; gap: 32px; }
+nav a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color .2s; }
+nav a:hover { color: var(--ink); }
+.cart { background: transparent; border: 1px solid var(--line); color: var(--ink);
+  padding: 9px 16px; border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer;
+  transition: border-color .2s, background .2s; }
+.cart:hover { border-color: var(--accent); }
+.cart span { background: var(--accent); color: #0a0a0c; border-radius: 999px;
+  padding: 1px 7px; margin-left: 6px; font-weight: 700; font-size: 11px; }
+.hero { padding: 120px 48px 90px; max-width: 1100px; }
+.eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px;
+  color: var(--accent); margin: 0 0 26px; }
+h1 { font-size: clamp(46px, 7.2vw, 92px); line-height: .98; letter-spacing: -.045em;
+  margin: 0 0 30px; font-weight: 600; }
+h1 em { font-family: "Instrument Serif", Georgia, serif; font-style: italic; color: var(--accent); }
+.lede { max-width: 520px; color: var(--muted); font-size: 17px; line-height: 1.65; margin: 0 0 38px; }
+.cta { display: flex; gap: 14px; flex-wrap: wrap; }
+.btn { text-decoration: none; padding: 14px 26px; border-radius: 999px; font-size: 14px;
+  transition: transform .2s, background .2s, color .2s; display: inline-block; }
+.btn.primary { background: var(--accent); color: #0a0a0c; font-weight: 600; }
+.btn.primary:hover { transform: translateY(-2px); }
+.btn.ghost { color: var(--ink); border: 1px solid var(--line); }
+.btn.ghost:hover { background: rgba(255,255,255,.06); }
+.meta { display: flex; gap: 12px; color: #6f6f7b; font-size: 12px; margin-top: 46px; }
+.shop { padding: 40px 48px 100px; border-top: 1px solid var(--line); }
+.section-head { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 20px; margin-bottom: 34px; flex-wrap: wrap; }
+.section-head h2 { font-size: 30px; letter-spacing: -.03em; margin: 0; font-weight: 600; }
+.section-head p { color: var(--muted); margin: 0; font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+.card { border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+  background: #101014; transition: transform .25s, border-color .25s; cursor: pointer; }
+.card:hover { transform: translateY(-4px); border-color: rgba(216,255,107,.45); }
+.thumb { aspect-ratio: 1; background-size: cover; background-position: center; }
+.card-body { padding: 16px 18px 20px; }
+.card-body h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.card-body p { margin: 0; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .12em; }
+.price { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+.price b { font-weight: 600; font-size: 15px; }
+.add { background: rgba(255,255,255,.06); border: 0; color: var(--ink); border-radius: 999px;
+  padding: 7px 13px; font-size: 12px; cursor: pointer; }
+.add:hover { background: var(--accent); color: #0a0a0c; }
+.story { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; padding: 100px 48px;
+  border-top: 1px solid var(--line); background: linear-gradient(180deg, #0a0a0c, #0e0e12); }
+.story h2 { font-size: clamp(30px, 4vw, 52px); line-height: 1.02; letter-spacing: -.04em; margin: 0; }
+.story p { color: var(--muted); line-height: 1.8; font-size: 16px; margin: 0; align-self: end; }
+footer { display: flex; justify-content: space-between; align-items: center; gap: 20px;
+  padding: 40px 48px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px;
+  flex-wrap: wrap; }
+footer .tiny { color: #55555f; }
+@media (max-width: 760px) {
+  .nav, .hero, .shop, .story, footer { padding-left: 22px; padding-right: 22px; }
+  nav { display: none; }
+  .story { grid-template-columns: 1fr; gap: 24px; }
+}`;
+
+  const js = `const products = [
+  { name: "Aurora Hoodie", cat: "Apparel", price: 148, img: "linear-gradient(135deg,#FDCB6E,#E17055)" },
+  { name: "Nebula Lamp", cat: "Home", price: 219, img: "linear-gradient(135deg,#6C5CE7,#00CEC9)" },
+  { name: "Pulse Speaker", cat: "Audio", price: 329, img: "linear-gradient(135deg,#FD366E,#6C5CE7)" },
+  { name: "Tidal Bottle", cat: "Accessories", price: 54, img: "linear-gradient(135deg,#00B894,#0984E3)" },
+  { name: "Clay Mug Set", cat: "Home", price: 72, img: "linear-gradient(135deg,#E17055,#FDCB6E)" },
+  { name: "Aurora Tote", cat: "Accessories", price: 96, img: "linear-gradient(135deg,#0984E3,#6C5CE7)" }
+];
+
+const grid = document.getElementById("grid");
+const countEl = document.getElementById("count");
+let count = 0;
+
+products.forEach(function (p) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML =
+    '<div class="thumb" style="background:' + p.img + '"></div>' +
+    '<div class="card-body">' +
+      '<h3>' + p.name + '</h3>' +
+      '<p>' + p.cat + '</p>' +
+      '<div class="price"><b>€' + p.price + '</b><button class="add">Add</button></div>' +
+    '</div>';
+  card.querySelector(".add").addEventListener("click", function (e) {
+    e.stopPropagation();
+    count += 1;
+    countEl.textContent = String(count);
+    countEl.animate(
+      [{ transform: "scale(1)" }, { transform: "scale(1.5)" }, { transform: "scale(1)" }],
+      { duration: 320, easing: "ease-out" }
+    );
+  });
+  grid.appendChild(card);
+});
+`;
+  return [
+    { path: 'index.html', content: html },
+    { path: 'styles.css', content: css },
+    { path: 'app.js', content: js },
+  ];
+}

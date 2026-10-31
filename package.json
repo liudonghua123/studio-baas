@@ -1,0 +1,37 @@
+{
+  "name": "studio-baas",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Studio BaaS — a TypeScript full-stack BaaS console with online function/site editors and a DeepSeek agent",
+  "scripts": {
+    "dev": "pnpm --parallel -r dev",
+    "build": "pnpm --filter web build && pnpm --filter server build",
+    "start": "node server/dist/index.js",
+    "typecheck": "pnpm -r typecheck",
+    "tunnel": "bash scripts/tunnel.sh",
+    "tunnel:prod": "bash scripts/tunnel.sh --prod"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "license": "MIT",
+  "author": "liudonghua123",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liudonghua123/studio-baas.git"
+  },
+  "homepage": "https://github.com/liudonghua123/studio-baas#readme",
+  "keywords": [
+    "baas",
+    "appwrite",
+    "typescript",
+    "react",
+    "express",
+    "sqlite",
+    "deepseek",
+    "ai-agent"
+  ]
+}
