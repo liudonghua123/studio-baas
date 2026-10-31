@@ -513,8 +513,14 @@ export async function executeFunction(id: string, payload: any, triggerType = 'm
 
   let status: 'completed' | 'failed' = 'completed';
   try {
-    const out = await executeFunctionCode(fn.code, ctx, fn.timeout);
-    if (out !== undefined && res.body === null) res.body = out;
+    const outcome = await executeFunctionCode(fn.code, ctx, fn.timeout);
+    // worker 在独立线程里收集的日志要搬回来一起落库
+    if (outcome.logs.length) logs.push(...outcome.logs);
+    if (outcome.errors.length) errors.push(...outcome.errors);
+    if (outcome.status !== undefined) res.status = outcome.status;
+    if (outcome.headers) res.headers = { ...res.headers, ...outcome.headers };
+    if (outcome.failure) throw new Error(outcome.failure);
+    if (outcome.value !== undefined && res.body === null) res.body = outcome.value;
   } catch (e: any) {
     status = 'failed';
     errors.push(e?.message || String(e));

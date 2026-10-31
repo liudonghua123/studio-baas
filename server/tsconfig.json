@@ -7,6 +7,10 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
+    // function-worker.mjs 是纯 JS（worker 无法继承 tsx 的 loader），
+    // allowJs 让它原样复制到 dist/，开发态与构建态用同一个路径
+    "allowJs": true,
+    "checkJs": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,

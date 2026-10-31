@@ -1,110 +1,163 @@
-import vm from 'node:vm';
-import { createRequire } from 'node:module';
+import { Worker } from 'node:worker_threads';
+import { runInSandbox, transpile, type ExecContext } from './sandbox.js';
+import { currentPrincipal, currentProjectId, runWithContext, type Principal } from './context.js';
 
-const nodeRequire = createRequire(import.meta.url);
-const ALLOWED_MODULES = new Set([
-  'crypto', 'node:crypto', 'url', 'node:url', 'util', 'node:util',
-  'querystring', 'node:querystring', 'buffer', 'node:buffer', 'uuid',
-]);
+export type { ExecContext };
+export { transpile };
 
-export interface ExecContext {
-  req: { method: string; path: string; headers: Record<string, string>; body: any; query: Record<string, string> };
-  res: {
-    status: number; headers: Record<string, string>; body: any;
-    json(b: any): any; text(b: string): any; send(b: any): any; redirect(u: string): any;
-  };
-  log: (...args: any[]) => void;
-  error: (...args: any[]) => void;
-  env: Record<string, string>;
-  databases: Record<string, (...args: any[]) => any>;
-  storage: Record<string, (...args: any[]) => any>;
-  users: Record<string, (...args: any[]) => any>;
-  meta: Record<string, unknown>;
+/** 一次执行的产出：日志要跨线程带回来，错误单独标记，便于落库时区分 */
+export interface ExecutionOutcome {
+  value: any;
+  logs: string[];
+  errors: string[];
+  failure?: string;
+  /** worker 里设置的响应状态/头；vm 降级路径直接写在同一对象上，无需回传 */
+  status?: number;
+  headers?: Record<string, string>;
 }
 
-/** Transpile a small subset of ESM (default export + named imports) to CJS. */
-export function transpile(code: string): string {
-  let js = code;
-  js = js.replace(/export\s+default\s+/g, 'module.exports.default = ');
-  js = js.replace(/^\s*export\s+(const|let|var|async\s+function|function|class)\s+/gm, '$1 ');
-  js = js.replace(
-    /^\s*import\s+([\w*\s{},$]+?)\s+from\s+['"]([^'"]+)['"];?/gm,
-    (_m, names: string, mod: string) => {
-      const n = names.trim();
-      if (n.startsWith('{')) return `const ${n} = require('${mod}');`;
-      if (n.startsWith('*')) return `const ${n.replace(/\*\s*as\s*/, '')} = require('${mod}');`;
-      return `const ${n} = require('${mod}');`;
-    },
-  );
-  return js;
-}
+const PAYLOAD_BYTES = 2 * 1024 * 1024;
+const WORKER_URL = new URL('./function-worker.mjs', import.meta.url);
 
-export async function executeFunctionCode(code: string, ctx: ExecContext, timeoutSec = 15): Promise<any> {
-  const js = transpile(code);
-  const sandboxConsole = {
-    log: (...a: any[]) => ctx.log(...a),
-    info: (...a: any[]) => ctx.log(...a),
-    warn: (...a: any[]) => ctx.log('[warn]', ...a),
-    error: (...a: any[]) => ctx.error(...a),
-    debug: (...a: any[]) => ctx.log(...a),
-  };
-  const sandbox: Record<string, any> = {
-    console: sandboxConsole,
-    module: { exports: {} as any },
-    exports: {},
-    Buffer,
-    URL,
-    URLSearchParams,
-    TextEncoder,
-    TextDecoder,
-    setTimeout: (fn: (...args: any[]) => void, ms?: number, ...args: any[]) => setTimeout(fn, Math.min(ms ?? 0, 5000), ...args),
-    clearTimeout,
-    Promise,
-    fetch: async () => { throw new Error('Outbound network access is disabled in the sandbox'); },
-    process: { env: { ...ctx.env }, platform: 'linux', version: 'v22' },
-    require: (name: string) => {
-      if (!ALLOWED_MODULES.has(name)) {
-        throw new Error(`Module "${name}" is not available in the function runtime`);
-      }
-      if (name === 'uuid') return { v4: () => crypto.randomUUID() };
-      return nodeRequire(name);
-    },
-  };
-  sandbox.globalThis = sandbox;
-  const context = vm.createContext(sandbox, { codeGeneration: { strings: true, wasm: false } });
-
-  const wrapper = new vm.Script(
-    `(function (exports, module, require, __ctx) {\n${js}\n})`,
-    { filename: 'main.js' },
-  ).runInContext(context, { timeout: Math.min(timeoutSec * 1000, 30000) });
-
-  wrapper.call(sandbox.exports, sandbox.exports, sandbox.module, sandbox.require, ctx);
-
-  const fn = sandbox.module.exports.default ?? sandbox.module.exports;
-  if (typeof fn !== 'function') {
-    throw new Error('Entrypoint must export a default function, e.g. `export default async ({ req, res }) => { ... }`');
+/**
+ * 执行用户函数。
+ *
+ * 默认走 worker 线程：`await null; while(true){}` 这类「异步后的死循环」在主线程里
+ * 无法中断（vm 的 timeout 只覆盖同步段，Promise.race 又依赖事件循环），会让整个
+ * 后端失去响应。放进独立线程后，主线程只要 timer 到点就 `terminate()`，服务照常。
+ *
+ * 降级顺序：worker → 同进程 vm（`FUNCTION_ISOLATION=vm` 可强制），
+ * 保证在受限环境（无 SharedArrayBuffer / worker 启动失败）里功能不中断。
+ */
+export async function executeFunctionCode(
+  code: string,
+  ctx: ExecContext,
+  timeoutSec = 15,
+): Promise<ExecutionOutcome> {
+  if (process.env.FUNCTION_ISOLATION === 'vm') {
+    return { value: await runInSandbox(code, ctx, timeoutSec), logs: [], errors: [] };
   }
-
-  let timer: NodeJS.Timeout;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Execution timed out after ${timeoutSec}s`)), timeoutSec * 1000);
-  });
   try {
-    // 关键：`while (true) {}` 这类同步死循环不会让出事件循环，Promise.race 根本
-    // 没机会执行，整个 Node 进程（含所有 HTTP 请求）会被一起冻住。
-    // 因此把「调用函数」这一步也放进 vm 并带上 timeout，由 V8 强制中断。
-    sandbox.__call = () => fn(ctx);
-    const invoke = new vm.Script('__result = __call()', { filename: 'invoke.js' });
-    try {
-      invoke.runInContext(context, { timeout: timeoutSec * 1000 });
-    } catch (e: any) {
-      if (e?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
-        throw new Error(`Execution timed out after ${timeoutSec}s (blocking loop terminated)`);
-      }
-      throw e;
-    }
-    return await Promise.race([sandbox.__result, timeout]);
-  } finally {
-    clearTimeout(timer!);
+    return await runIsolated(code, ctx, timeoutSec);
+  } catch (e: any) {
+    if (e?.code !== 'WORKER_UNAVAILABLE') throw e;
+    console.warn('[runtime] worker unavailable, falling back to in-process vm:', e.message);
+    return { value: await runInSandbox(code, ctx, timeoutSec), logs: [], errors: [] };
   }
+}
+
+function runIsolated(code: string, ctx: ExecContext, timeoutSec: number): Promise<ExecutionOutcome> {
+  const timeoutMs = Math.max(1, Math.round(timeoutSec * 1000));
+  // 触发器 / 定时任务里没有 HTTP 上下文，但项目与身份必须跟着线程走
+  const scope: { projectId: string; principal: Principal | null } = {
+    projectId: currentProjectId(),
+    principal: currentPrincipal(),
+  };
+
+  let sab: SharedArrayBuffer;
+  try {
+    sab = new SharedArrayBuffer(8 + PAYLOAD_BYTES);
+  } catch {
+    const e: any = new Error('SharedArrayBuffer is unavailable in this environment');
+    e.code = 'WORKER_UNAVAILABLE';
+    return Promise.reject(e);
+  }
+
+  return new Promise<ExecutionOutcome>((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(WORKER_URL, {
+        workerData: {
+          code, env: ctx.env, timeoutMs, sab,
+          req: ctx.req, meta: ctx.meta,
+        },
+        resourceLimits: { maxOldGenerationSizeMb: 256 },
+        stdout: false,
+        stderr: false,
+      });
+    } catch (e: any) {
+      e.code = 'WORKER_UNAVAILABLE';
+      return reject(e);
+    }
+
+    let settled = false;
+    const flag = new Int32Array(sab, 0, 2);
+    const shared = new Uint8Array(sab, 8);
+    const enc = new TextEncoder();
+
+    const finish = (err: Error | null, out?: ExecutionOutcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // 结果已经拿到，直接终止线程，避免用户留下的 interval/长任务继续占资源
+      worker.terminate().catch(() => {});
+      err ? reject(err) : resolve(out!);
+    };
+
+    // 比 worker 内部超时多给 750ms：优先让 worker 自己给出可读的错误信息
+    const timer = setTimeout(() => {
+      finish(new Error(`Execution timed out after ${timeoutSec}s (worker terminated)`));
+    }, timeoutMs + 750);
+
+    worker.on('message', (msg: any) => {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'rpc') {
+        // 注意：这里必须同步执行——worker 正阻塞在 Atomics.wait 上等结果
+        let payload: string;
+        try {
+          const ns = ctx[msg.ns as keyof ExecContext] as any;
+          const fn = ns?.[msg.method];
+          if (typeof fn !== 'function') throw new Error(`Unknown runtime API ${msg.ns}.${msg.method}`);
+          const value = runWithContext(scope, () => fn(...(Array.isArray(msg.args) ? msg.args : [])));
+          if (value && typeof value.then === 'function') {
+            throw new Error(`${msg.ns}.${msg.method}() returned a Promise; the isolated runtime only supports synchronous calls`);
+          }
+          payload = JSON.stringify({ value: value === undefined ? null : value });
+        } catch (e: any) {
+          payload = JSON.stringify({ error: e?.message || String(e) });
+        }
+        const bytes = enc.encode(payload);
+        if (bytes.length > PAYLOAD_BYTES) {
+          const errBytes = enc.encode(JSON.stringify({ error: `Response too large (>${PAYLOAD_BYTES} bytes)` }));
+          shared.set(errBytes, 0);
+          Atomics.store(flag, 1, errBytes.length);
+        } else {
+          shared.set(bytes, 0);
+          Atomics.store(flag, 1, bytes.length);
+        }
+        Atomics.store(flag, 0, 1);
+        Atomics.notify(flag, 0);
+        return;
+      }
+      if (msg.type === 'result') {
+        finish(null, {
+          value: msg.body,
+          logs: Array.isArray(msg.logs) ? msg.logs : [],
+          errors: Array.isArray(msg.errors) ? msg.errors : [],
+          failure: msg.failure || undefined,
+          status: typeof msg.status === 'number' ? msg.status : undefined,
+          headers: msg.headers && typeof msg.headers === 'object' ? msg.headers : undefined,
+        });
+      }
+    });
+
+    worker.on('error', (err: any) => {
+      if (settled) return;
+      if (err?.code === 'ERR_WORKER_OUT_OF_MEMORY') {
+        return finish(new Error(`Function exceeded the memory limit (256MB)`));
+      }
+      // 启动期错误（文件缺失、加载器未注册）视为环境问题，交由上层降级
+      const code = String(err?.code || '');
+      if (code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_UNKNOWN_FILE_EXTENSION') {
+        const e: any = new Error(`Worker bootstrap failed: ${err.message}`);
+        e.code = 'WORKER_UNAVAILABLE';
+        return finish(e);
+      }
+      finish(new Error(err?.message || String(err)));
+    });
+
+    worker.on('exit', () => {
+      if (!settled) finish(new Error('Function worker exited before returning a result'));
+    });
+  });
 }
