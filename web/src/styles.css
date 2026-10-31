@@ -778,3 +778,25 @@ tr:hover .row-actions { opacity: 1; }
   width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center;
   background: rgba(255,255,255,.08); font-size: 10px; color: var(--muted); flex: none;
 }
+
+/* --------------------------------------------------- github integration */
+.git-meta { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 10px 16px; }
+.git-meta > div { min-width: 0; }
+.git-meta a:hover { color: #ff6b93 !important; text-decoration: underline; }
+.git-sha {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  font-family: var(--mono); font-size: 10.5px; color: #c4b5fd;
+  background: rgba(108, 92, 231, 0.12); border: 1px solid rgba(108, 92, 231, 0.28);
+  border-radius: 5px; padding: 1px 6px;
+}
+.git-commit { display: flex; gap: 8px; align-items: flex-start; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+.git-commit:last-child { border-bottom: none; }
+.git-commit > div { min-width: 0; }
+.dns-box { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dns-box code { min-width: 0; }
+
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.switch input { appearance: none; width: 30px; height: 17px; border-radius: 999px; background: rgba(255,255,255,.14); position: relative; cursor: pointer; transition: background .15s; }
+.switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch input:checked { background: #fd366e; }
+.switch input:checked::after { transform: translateX(13px); }

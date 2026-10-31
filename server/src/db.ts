@@ -99,6 +99,18 @@ export function migrate() {
     id TEXT PRIMARY KEY, projectId TEXT NOT NULL, userId TEXT NOT NULL, role TEXT NOT NULL,
     createdAt TEXT NOT NULL, UNIQUE(projectId, userId)
   );
+  CREATE TABLE IF NOT EXISTS gitIntegrations (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, functionId TEXT NOT NULL, provider TEXT DEFAULT 'github',
+    repo TEXT NOT NULL, branch TEXT DEFAULT 'main', rootDir TEXT, path TEXT, token TEXT,
+    autoDeploy INTEGER DEFAULT 1, webhookSecret TEXT, lastSyncAt TEXT, lastSha TEXT,
+    lastMessage TEXT, lastAuthor TEXT, lastStatus TEXT,
+    createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS gitDeploys (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, functionId TEXT NOT NULL, sha TEXT,
+    message TEXT, author TEXT, source TEXT, status TEXT, files INTEGER DEFAULT 1,
+    duration REAL, createdAt TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY, name TEXT, provider TEXT, model TEXT, systemPrompt TEXT,
     tools TEXT, createdAt TEXT NOT NULL

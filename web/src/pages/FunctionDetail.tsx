@@ -13,6 +13,7 @@ import { fmtDuration, statusTone, timeAgo, fmtDateTime } from '../lib/format';
 import { useAuth } from '../lib/auth';
 import DomainsTab from '../components/DomainsTab';
 import SchedulesTab from '../components/SchedulesTab';
+import GitHubTab from '../components/GitHubTab';
 
 export default function FunctionDetail() {
   const { id } = useParams();
@@ -33,7 +34,7 @@ export default function FunctionDetail() {
   const [envOpen, setEnvOpen] = useState(false);
   const [envRows, setEnvRows] = useState<{ k: string; v: string }[]>([]);
   const [meta, setMeta] = useState({ name: '', timeout: 15, schedule: '' });
-  const [view, setView] = useState<'code' | 'domains' | 'schedules'>('code');
+  const [view, setView] = useState<'code' | 'domains' | 'schedules' | 'git'>('code');
 
   const load = async () => {
     try {
@@ -142,6 +143,9 @@ export default function FunctionDetail() {
         </button>
         <button className={`tab ${view === 'schedules' ? 'active' : ''}`} onClick={() => setView('schedules')}>
           <CalendarClock size={13} /> Schedules
+        </button>
+        <button className={`tab ${view === 'git' ? 'active' : ''}`} onClick={() => setView('git')}>
+          <GitBranch size={13} /> GitHub
         </button>
       </div>
 
@@ -268,8 +272,10 @@ export default function FunctionDetail() {
         </div>
       </div>) : view === 'domains' ? (
         <DomainsTab functionId={fn.id} functionName={fn.name} />
-      ) : (
+      ) : view === 'schedules' ? (
         <SchedulesTab functionId={fn.id} functionName={fn.name} />
+      ) : (
+        <GitHubTab functionId={fn.id} functionName={fn.name} />
       )}
 
       <Modal open={payloadOpen} onClose={() => setPayloadOpen(false)} title="Execute function"

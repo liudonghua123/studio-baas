@@ -1,6 +1,7 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, FunctionDomain, LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
+  FileItem, FunctionDef, FunctionDomain, GitCommit, GitDeploy, GitIntegration,
+  LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -99,6 +100,15 @@ export const api = {
   runSchedule: (sid: string) => post<Execution>(`/v1/schedules/${sid}/run`),
   cronPreview: (expr: string, tz = 'UTC') =>
     get<{ next: string[]; description: string }>(`/v1/cron/preview?expr=${encodeURIComponent(expr)}&tz=${encodeURIComponent(tz)}`),
+
+  git: (id: string) => get<{ integration: GitIntegration | null; mode: 'simulate' | 'live'; deploys: GitDeploy[] }>(`/v1/functions/${id}/git`),
+  connectGit: (id: string, body: any) => post<GitIntegration>(`/v1/functions/${id}/git`, body),
+  updateGit: (id: string, body: any) => patch<GitIntegration>(`/v1/functions/${id}/git`, body),
+  disconnectGit: (id: string) => del(`/v1/functions/${id}/git`),
+  gitCommits: (id: string) => get<{ commits: GitCommit[] }>(`/v1/functions/${id}/git/commits`),
+  gitPull: (id: string) => post<{ sha: string; message: string; author: string; path: string; mode: string; duration: number }>(`/v1/functions/${id}/git/pull`),
+  gitPush: (id: string) => post<{ sha: string; message: string; mode: string }>(`/v1/functions/${id}/git/push`),
+  gitTestDelivery: (id: string) => post<{ ok: boolean; action: string; reason: string; deploy?: any }>(`/v1/functions/${id}/git/test-delivery`),
 
   sites: () => get<{ sites: Site[] }>('/v1/sites'),
   site: (id: string) => get<Site>(`/v1/sites/${id}`),

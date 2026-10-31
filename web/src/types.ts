@@ -46,6 +46,21 @@ export interface Schedule {
   nextRunAt: string | null; lastRunAt: string | null; lastStatus: string | null;
   description?: string; createdAt: string;
 }
+export interface GitIntegration {
+  id: string; projectId: string; functionId: string; functionName?: string;
+  provider: 'github'; repo: string; branch: string; rootDir: string; path: string;
+  autoDeploy: boolean; hasToken: boolean; webhookSecret: string;
+  lastSyncAt: string | null; lastSha: string | null; lastMessage: string | null;
+  lastAuthor: string | null; lastStatus: string | null;
+  createdAt: string; updatedAt: string;
+}
+export interface GitDeploy {
+  id: string; functionId: string; sha: string; message: string; author: string;
+  source: string; status: string; files: number; duration: number; createdAt: string;
+}
+export interface GitCommit {
+  sha: string; message: string; author: string; date: string | null; url: string | null;
+}
 export interface Execution {
   id: string; functionId: string; functionName: string; status: string; triggerType: string;
   duration: number; logs: string[]; response: any; errors: string[]; createdAt: string;

@@ -714,3 +714,36 @@ export function seedSchedules() {
   }
   return true;
 }
+
+/** 演示用 GitHub 连接：让 fn_stats 绑定到一个仓库，并写入两条部署记录 */
+export function seedGit() {
+  const target = db.prepare('SELECT * FROM functions WHERE id=?').get('fn_stats') as any;
+  if (!target) return false;
+  if (db.prepare('SELECT 1 FROM gitIntegrations WHERE functionId=?').get('fn_stats')) return true;
+
+  const t = now();
+  const sha = 'b7e41c9';
+  db.prepare(`INSERT INTO gitIntegrations
+    (id,projectId,functionId,provider,repo,branch,rootDir,path,token,autoDeploy,webhookSecret,
+     lastSyncAt,lastSha,lastMessage,lastAuthor,lastStatus,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    uid('git_'), target.projectId, 'fn_stats', 'github', 'studio-baas/demo-functions', 'main',
+    'functions/store-stats', 'functions/store-stats/src/main.js', null, 1,
+    'demo-webhook-secret-2f9a4c', t, sha,
+    'feat: report per-collection counts', 'Mia Fischer', 'deployed',
+    new Date(Date.now() - 86_400_000 * 3).toISOString(), t,
+  );
+
+  const deploys: [string, string, string, string, string, number][] = [
+    ['b7e41c9', 'feat: report per-collection counts', 'Mia Fischer', 'webhook', 'deployed', 86_400_000 * 3],
+    ['4d02a71', 'chore: bump runtime to node-22', 'Alex Fisher', 'manual', 'deployed', 86_400_000 * 9],
+  ];
+  for (const [s, message, author, source, status, ago] of deploys) {
+    db.prepare(`INSERT INTO gitDeploys (id,projectId,functionId,sha,message,author,source,status,files,duration,createdAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      uid('dep_'), target.projectId, 'fn_stats', s, message, author, source, status, 1,
+      480 + Math.round(Math.random() * 260), new Date(Date.now() - ago).toISOString(),
+    );
+  }
+  return true;
+}

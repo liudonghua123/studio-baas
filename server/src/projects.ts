@@ -104,6 +104,7 @@ export function deleteProject(id: string): boolean {
       db.prepare('DELETE FROM functionDomains WHERE projectId=?').run(cur.id);
       db.prepare('DELETE FROM schedules WHERE projectId=?').run(cur.id);
       db.prepare('DELETE FROM gitIntegrations WHERE projectId=?').run(cur.id);
+      db.prepare('DELETE FROM gitDeploys WHERE projectId=?').run(cur.id);
     } catch { /* 表可能尚未迁移 */ }
     db.prepare('DELETE FROM projects WHERE id=?').run(cur.id);
   })();

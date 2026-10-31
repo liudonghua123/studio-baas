@@ -395,6 +395,13 @@ export function deleteFunction(id: string) {
   const cur = getFunction(id);
   if (!cur) return false;
   db.prepare('DELETE FROM executions WHERE functionId=?').run(id);
+  // 删除函数时一并清理它的附属资源，避免悬挂的域名/调度/仓库绑定
+  try {
+    db.prepare('DELETE FROM functionDomains WHERE functionId=?').run(id);
+    db.prepare('DELETE FROM schedules WHERE functionId=?').run(id);
+    db.prepare('DELETE FROM gitIntegrations WHERE functionId=?').run(id);
+    db.prepare('DELETE FROM gitDeploys WHERE functionId=?').run(id);
+  } catch { /* 表可能尚未迁移 */ }
   db.prepare('DELETE FROM functions WHERE id=?').run(id);
   bus.publish({ type: 'function', action: 'delete', resource: cur.name });
   return true;

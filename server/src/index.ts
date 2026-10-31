@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate, db, now } from './db.js';
-import { seed, seedDemoProject, seedMembers, seedSchedules } from './seed.js';
+import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
@@ -15,6 +15,7 @@ import { resolveAuth, guard, me } from './auth.js';
 import * as members from './members.js';
 import * as domains from './domains.js';
 import * as schedules from './schedules.js';
+import * as git from './git.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,10 +28,15 @@ const seeded = seed();
 seedDemoProject();
 seedMembers();
 seedSchedules();
+seedGit();
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '12mb' }));
+// 保留原始请求体：GitHub webhook 的 HMAC 验签必须基于未解析的字节
+app.use(express.json({
+  limit: '12mb',
+  verify: (req, _res, buf) => { (req as any).rawBody = Buffer.from(buf); },
+}));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
 
@@ -341,6 +347,47 @@ app.post('/v1/functions/:id/domains/:domainId/verify', guard('functions.write'),
 
 app.delete('/v1/functions/:id/domains/:domainId', guard('functions.write'), wrap((req, res) => {
   res.json({ ok: domains.removeDomain(req.params.domainId) });
+}));
+
+/* ------------------------------------------------------ github integration */
+app.get('/v1/functions/:id/git', guard('functions.read'), wrap((req, res) => {
+  const it = git.getIntegration(req.params.id);
+  res.json({ integration: it, mode: git.gitMode, deploys: it ? git.listDeploys(req.params.id, 10) : [] });
+}));
+
+app.post('/v1/functions/:id/git', guard('functions.write'), wrap((req, res) => {
+  if (!store.getFunction(req.params.id)) return fail(res, new Error('Function not found'), 404);
+  res.status(201).json(git.connect(req.params.id, req.body || {}));
+}));
+
+app.patch('/v1/functions/:id/git', guard('functions.write'), wrap((req, res) => {
+  res.json(git.connect(req.params.id, req.body || {}));
+}));
+
+app.delete('/v1/functions/:id/git', guard('functions.write'), wrap((req, res) => {
+  res.json({ ok: git.disconnect(req.params.id) });
+}));
+
+app.get('/v1/functions/:id/git/commits', guard('functions.read'), wrap(async (req, res) => {
+  res.json({ commits: await git.commits(req.params.id, Number(req.query.limit) || 5) });
+}));
+
+app.post('/v1/functions/:id/git/pull', guard('functions.write'), wrap(async (req, res) => {
+  res.json(await git.pull(req.params.id, 'manual'));
+}));
+
+app.post('/v1/functions/:id/git/push', guard('functions.write'), wrap(async (req, res) => {
+  res.json(await git.push(req.params.id));
+}));
+
+app.post('/v1/functions/:id/git/test-delivery', guard('functions.write'), wrap(async (req, res) => {
+  res.json(await git.testDelivery(req.params.id));
+}));
+
+// 由 GitHub 调用，不做会话鉴权，改用 webhook secret 的 HMAC 签名校验
+app.post('/v1/git/webhook/:gid', wrap(async (req, res) => {
+  const out = await git.handleWebhook(req.params.gid, req.headers as any, (req as any).rawBody, req.body);
+  res.status(out.status).json(out);
 }));
 
 /* ---------------------------------------------------------------- sites */
