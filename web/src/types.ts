@@ -9,6 +9,16 @@ export interface Collection {
   documentSecurity: boolean; enabled: boolean; createdAt: string; updatedAt: string;
   attributes?: Attribute[]; documentCount?: number;
 }
+export interface CollectionIndex {
+  id: string; collectionId: string; key: string; type: 'key' | 'unique';
+  attributes: string[]; orders: ('ASC' | 'DESC')[];
+  status: 'available' | 'failed'; error: string | null; createdAt: string;
+}
+export interface QueryPlan {
+  plan: { id: number; parent: number; detail: string }[];
+  index: string | null; terms: string[]; narrowed: boolean;
+  fullScan: boolean; tempBTree: boolean; sql: string;
+}
 export interface Attribute {
   id: string; collectionId: string; key: string; type: string; required: boolean;
   array: boolean; size?: number; defaultVal?: string | null; elements?: string[]; createdAt: string;

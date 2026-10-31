@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate, backfillFunctionVersions, db, now } from './db.js';
-import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit, seedDomains } from './seed.js';
+import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit, seedDomains, seedIndexes } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
@@ -31,6 +31,7 @@ seedMembers();
 seedSchedules();
 seedGit();
 seedDomains();
+seedIndexes();
 // 种子函数是直接 INSERT 的，补一次版本基线（幂等）
 backfillFunctionVersions();
 
@@ -114,7 +115,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ---------------------------------------------------------------- core */
-app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.7.0-studio', uptime: process.uptime() }));
+app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.8.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
@@ -217,6 +218,37 @@ app.post('/v1/databases/collections/:id/attributes', guard('databases.write'), w
 app.delete('/v1/databases/collections/:id/attributes/:attrId', guard('databases.write'), wrap((req, res) => {
   const ok = store.deleteAttribute(req.params.id, req.params.attrId);
   res.json({ ok });
+}));
+
+/* -------------------------------------------------------------- indexes */
+app.get('/v1/databases/collections/:id/indexes', guard('databases.read'), wrap((req, res) => {
+  const indexes = store.listCollectionIndexes(req.params.id);
+  res.json({ total: indexes.length, indexes });
+}));
+
+app.post('/v1/databases/collections/:id/indexes', guard('databases.write'), wrap((req, res) => {
+  const idx = store.createCollectionIndex(req.params.id, req.body || {});
+  // 唯一索引撞上历史重复数据时不会抛错，而是落成 failed，所以这里用 201 + status 表达
+  res.status(201).json(idx);
+}));
+
+app.delete('/v1/databases/collections/:id/indexes/:indexId', guard('databases.write'), wrap((req, res) => {
+  const ok = store.deleteCollectionIndex(req.params.id, req.params.indexId);
+  if (!ok) return fail(res, new Error('Index not found'), 404);
+  res.json({ ok });
+}));
+
+/** 解释一条查询：索引是否生效的官方口径，前端「Query plan」按钮直接用 */
+app.get('/v1/databases/collections/:id/query-plan', guard('databases.read'), wrap((req, res) => {
+  const plan = store.explainDocumentQuery(req.params.id, {
+    limit: Number(req.query.limit) || 25,
+    offset: Number(req.query.offset) || 0,
+    search: (req.query.search as string) || undefined,
+    orderBy: (req.query.orderBy as string) || undefined,
+    orderType: (req.query.orderType as 'asc' | 'desc') || 'desc',
+    queries: req.query['queries[]'] ?? req.query.queries,
+  });
+  res.json(plan);
 }));
 
 app.get('/v1/databases/collections/:id/documents', guard('databases.read'), wrap((req, res) => {

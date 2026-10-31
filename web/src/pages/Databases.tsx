@@ -3,8 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   Database, Plus, Search, Trash2, Pencil, RefreshCw, SlidersHorizontal,
   ChevronLeft, ChevronRight, Rows3, X, Check, Type, Hash, ToggleLeft, Calendar,
-  Mail, Link2, List, AlignLeft, FileJson, Table2, ShieldCheck, ShieldOff, Lock,
+  Mail, Link2, List, AlignLeft, FileJson, Table2, ShieldCheck, ShieldOff, Lock, KeyRound,
 } from 'lucide-react';
+import IndexesModal from '../components/IndexesModal';
 import { api } from '../api';
 import type { Attribute, Collection, Doc } from '../types';
 import { Badge, CopyButton, Drawer, Empty, Loading, Modal, useToast } from '../components/ui';
@@ -36,6 +37,7 @@ export default function Databases() {
   const [newCol, setNewCol] = useState(false);
   const [colForm, setColForm] = useState({ name: '', key: '', icon: 'database', color: '#6C5CE7', documentSecurity: false });
   const [attrModal, setAttrModal] = useState(false);
+  const [idxModal, setIdxModal] = useState(false);
   const [editing, setEditing] = useState<Doc | null>(null);
   const [docDrawer, setDocDrawer] = useState<'create' | 'edit' | null>(null);
   const [docData, setDocData] = useState<Record<string, any>>({});
@@ -243,6 +245,7 @@ export default function Databases() {
                   </div>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                     <button className="btn sm ghost" onClick={() => setAttrModal(true)}><SlidersHorizontal size={12} /> Attributes</button>
+                    <button className="btn sm ghost" onClick={() => setIdxModal(true)}><KeyRound size={12} /> Indexes</button>
                     <button className="btn sm danger" onClick={() => setConfirm({ type: 'collection', id: active.id, name: active.name })}>
                       <Trash2 size={12} />
                     </button>
@@ -414,6 +417,12 @@ export default function Databases() {
           </span>
         </label>
       </Modal>
+
+      {/* indexes + query plan */}
+      <IndexesModal
+        open={idxModal} onClose={() => setIdxModal(false)} collection={active}
+        onChanged={async () => { await loadCollections(); }}
+      />
 
       {/* attributes */}
       <AttributeModal

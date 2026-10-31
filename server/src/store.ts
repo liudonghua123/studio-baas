@@ -8,6 +8,11 @@ import { currentProjectId, currentPrincipal } from './context.js';
 import { parseQueries } from './query.js';
 import { hashApiKey, newApiKeySecret, previewApiKey } from './apikey.js';
 import {
+  listIndexes, createIndex as createIndexRow, deleteIndex as deleteIndexRow,
+  dropIndexesForCollection, indexesOnAttribute, translateConstraintError,
+  type CollectionIndex,
+} from './indexes.js';
+import {
   assertPermissionRules, documentAllows, ForbiddenError, DEFAULT_DOCUMENT_PERMISSIONS,
 } from './docperm.js';
 
@@ -119,6 +124,8 @@ export function updateCollection(id: string, patch: Partial<Pick<Collection, 'na
 export function deleteCollection(id: string): boolean {
   const cur = getCollection(id);
   if (!cur) return false;
+  // 先删物理索引再删数据：SQLite 的索引是独立对象，不随 DELETE 一起消失
+  dropIndexesForCollection(id);
   db.transaction(() => {
     db.prepare('DELETE FROM documents WHERE collectionId=?').run(id);
     db.prepare('DELETE FROM attributes WHERE collectionId=?').run(id);
@@ -159,6 +166,13 @@ export function addAttribute(collectionId: string, input: {
 }
 
 export function deleteAttribute(collectionId: string, attributeId: string): boolean {
+  const attr = listAttributes(collectionId).find((a) => a.id === attributeId);
+  if (!attr) return false;
+  // 索引依赖属性：直接删会让索引指向不存在的字段（SQLite 不会报错，但查询再也命中不了）
+  const used = indexesOnAttribute(collectionId, attr.key);
+  if (used.length) {
+    throw new Error(`Attribute "${attr.key}" is used by index ${used.map((i) => `"${i.key}"`).join(', ')} — delete the index first`);
+  }
   const r = db.prepare('DELETE FROM attributes WHERE id=? AND collectionId=?').run(attributeId, collectionId);
   bus.publish({ type: 'collection', action: 'attribute.delete' });
   return r.changes > 0;
@@ -228,13 +242,22 @@ export function validateDocument(collectionId: string, data: Record<string, unkn
   return out;
 }
 
-export function listDocuments(collectionId: string, opts: {
+export interface DocumentQueryOpts {
   limit?: number; offset?: number; search?: string; orderBy?: string; orderType?: 'asc' | 'desc';
   queries?: unknown;
-} = {}) {
-  const col = getCollection(collectionId);
-  if (!col) throw new Error(`Collection "${collectionId}" not found`);
-  // Appwrite 风格查询：equal(...) / orderDesc(...) / limit(...) 等，参数全部走占位符
+}
+
+interface BuiltDocumentQuery {
+  where: string[]; params: any[]; order: string; limit: number; offset: number;
+  select: string[] | null;
+}
+
+/**
+ * 把「Appwrite 风格查询 + 分页/搜索」编译成一段参数化 SQL。
+ * 列表查询和 EXPLAIN QUERY PLAN 共用它——否则「解释的计划」和「真实执行的语句」
+ * 很容易走偏，索引是否命中就成了自说自话。
+ */
+function buildDocumentQuery(col: Collection, opts: DocumentQueryOpts): BuiltDocumentQuery {
   const q = parseQueries(opts.queries);
   const limit = Math.min(Math.max(q.limit ?? opts.limit ?? 25, 1), 100);
   const offset = Math.max(q.offset ?? opts.offset ?? 0, 0);
@@ -251,8 +274,17 @@ export function listDocuments(collectionId: string, opts: {
     order = q.order;
   } else if (opts.orderBy) {
     const dir = opts.orderType === 'asc' ? 'ASC' : 'DESC';
-    order = opts.orderBy === '$createdAt' ? `createdAt ${dir}` : `json_extract(data, '$.${opts.orderBy.replace(/[^a-zA-Z0-9_]/g, '')}') ${dir}`;
+    order = opts.orderBy === '$createdAt'
+      ? `createdAt ${dir}`
+      : `json_extract(data, '$.${opts.orderBy.replace(/[^a-zA-Z0-9_]/g, '')}') ${dir}`;
   }
+  return { where, params, order, limit, offset, select: q.select };
+}
+
+export function listDocuments(collectionId: string, opts: DocumentQueryOpts = {}) {
+  const col = getCollection(collectionId);
+  if (!col) throw new Error(`Collection "${collectionId}" not found`);
+  const { where, params, order, limit, offset, select } = buildDocumentQuery(col, opts);
 
   let documents: Doc[];
   let total: number;
@@ -273,13 +305,81 @@ export function listDocuments(collectionId: string, opts: {
     ).all(...params, limit, offset) as any[]).map(docFromRow);
   }
 
-  if (q.select) {
-    const keep = new Set(q.select);
+  if (select) {
+    const keep = new Set(select);
     for (const d of documents) {
       d.data = Object.fromEntries(Object.entries(d.data).filter(([k]) => keep.has(k)));
     }
   }
   return { total, limit, offset, documents };
+}
+
+export interface QueryPlan {
+  plan: { id: number; parent: number; detail: string }[];
+  /** 实际使用的索引名；null 表示全表扫描 */
+  index: string | null;
+  /** 索引参与的条件，如 ['collectionId=?', '<expr>=?'] */
+  terms: string[];
+  /** 是否用上了除 collectionId 之外的条件（false = 只是把范围缩到一个集合，仍是集合内全扫） */
+  narrowed: boolean;
+  fullScan: boolean;
+  tempBTree: boolean;
+  sql: string;
+}
+
+/**
+ * 解释一条文档查询，告诉调用方它到底走了索引还是全表扫描。
+ * 这是索引功能的「验收口径」：建完索引必须能看到 SCAN → SEARCH 的变化。
+ *
+ * 注意 `documents` 上有一条 `idx_docs_col(collectionId)`，所以任何查询都会显示
+ * `USING INDEX`。真正要看的是索引参与的条件里有没有业务字段——只有 `collectionId=?`
+ * 时等于「集合内全扫」，1 万条和 10 条一样慢。业务索引是部分索引，条件里不会出现
+ * collectionId，因此会显示成 `<expr>=?` 这类项。
+ */
+export function explainDocumentQuery(collectionId: string, opts: DocumentQueryOpts = {}): QueryPlan {
+  const col = getCollection(collectionId);
+  if (!col) throw new Error(`Collection "${collectionId}" not found`);
+  const { where, params, order, limit, offset } = buildDocumentQuery(col, opts);
+  const sql = `SELECT * FROM documents WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`;
+  const rows = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params, limit, offset) as any[];
+  const details = rows.map((r) => String(r.detail));
+  const hit = details.map((d) => /USING (?:COVERING )?INDEX (\S+)(?: \((.*)\))?/.exec(d)).find(Boolean);
+  const index = hit?.[1] ?? null;
+  const terms = hit?.[2] ? hit[2].split(' AND ').map((t) => t.trim()).filter(Boolean) : [];
+  return {
+    plan: rows.map((r) => ({ id: r.id, parent: r.parent, detail: r.detail })),
+    index,
+    terms,
+    narrowed: terms.some((t) => !/^collectionId\s*=/.test(t)),
+    fullScan: !index,
+    tempBTree: details.some((d) => /TEMP B-TREE/.test(d)),
+    sql,
+  };
+}
+
+/* ------------------------------------------------------------------ indexes */
+
+export function listCollectionIndexes(collectionId: string): CollectionIndex[] {
+  if (!getCollection(collectionId)) throw new Error(`Collection "${collectionId}" not found`);
+  return listIndexes(getCollection(collectionId)!.id);
+}
+
+export function createCollectionIndex(collectionId: string, input: {
+  key?: string; type?: string; attributes?: unknown; orders?: unknown;
+}): CollectionIndex {
+  const col = getCollection(collectionId);
+  if (!col) throw new Error(`Collection "${collectionId}" not found`);
+  const idx = createIndexRow(col.id, input);
+  bus.publish({ type: 'collection', action: 'index.create', resource: idx.key });
+  return idx;
+}
+
+export function deleteCollectionIndex(collectionId: string, indexId: string): boolean {
+  const col = getCollection(collectionId);
+  if (!col) throw new Error(`Collection "${collectionId}" not found`);
+  const ok = deleteIndexRow(col.id, indexId);
+  if (ok) bus.publish({ type: 'collection', action: 'index.delete' });
+  return ok;
 }
 
 /** 不做权限判定的原始读取，仅供内部（更新/删除前取当前值）使用 */
@@ -310,9 +410,14 @@ export function createDocument(
   const rules = permissions?.length ? assertPermissionRules(permissions) : DEFAULT_DOCUMENT_PERMISSIONS;
   const id = docId || uid('doc_');
   const t = now();
-  db.prepare('INSERT INTO documents (id,collectionId,data,permissions,createdAt,updatedAt) VALUES (?,?,?,?,?,?)').run(
-    id, col.id, JSON.stringify(clean), JSON.stringify(rules), t, t,
-  );
+  try {
+    db.prepare('INSERT INTO documents (id,collectionId,data,permissions,createdAt,updatedAt) VALUES (?,?,?,?,?,?)').run(
+      id, col.id, JSON.stringify(clean), JSON.stringify(rules), t, t,
+    );
+  } catch (e: any) {
+    // 唯一索引冲突要给用户可读信息，而不是 "UNIQUE constraint failed: index 'ix_...'"
+    throw translateConstraintError(e) ?? e;
+  }
   bus.publish({ type: 'document', action: 'create', resource: col.key });
   return getDocumentRaw(col.id, id)!;
 }
@@ -334,9 +439,13 @@ export function updateDocument(
   const merged = merge ? { ...cur.data, ...data } : data;
   const clean = validateDocument(col.id, merged);
   const nextPerms = permissions === undefined ? cur.permissions : assertPermissionRules(permissions);
-  db.prepare('UPDATE documents SET data=?,permissions=?,updatedAt=? WHERE id=?').run(
-    JSON.stringify(clean), JSON.stringify(nextPerms), now(), docId,
-  );
+  try {
+    db.prepare('UPDATE documents SET data=?,permissions=?,updatedAt=? WHERE id=?').run(
+      JSON.stringify(clean), JSON.stringify(nextPerms), now(), docId,
+    );
+  } catch (e: any) {
+    throw translateConstraintError(e) ?? e;
+  }
   bus.publish({ type: 'document', action: 'update', resource: col.key });
   return getDocumentRaw(col.id, docId);
 }

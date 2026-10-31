@@ -1,6 +1,6 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
-  FileItem, FunctionDef, FunctionDomain, FunctionVersion, GitCommit, GitDeploy, GitIntegration,
+  FileItem, FunctionDef, FunctionDomain, FunctionVersion, CollectionIndex, QueryPlan, GitCommit, GitDeploy, GitIntegration,
   LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
 } from './types';
 
@@ -61,6 +61,17 @@ export const api = {
   deleteCollection: (id: string) => del(`/v1/databases/collections/${id}`),
   addAttribute: (id: string, body: any) => post<Attribute>(`/v1/databases/collections/${id}/attributes`, body),
   deleteAttribute: (id: string, attrId: string) => del(`/v1/databases/collections/${id}/attributes/${attrId}`),
+  indexes: (id: string) => get<{ total: number; indexes: CollectionIndex[] }>(`/v1/databases/collections/${id}/indexes`),
+  createIndex: (id: string, body: any) => post<CollectionIndex>(`/v1/databases/collections/${id}/indexes`, body),
+  deleteIndex: (id: string, indexId: string) => del(`/v1/databases/collections/${id}/indexes/${indexId}`),
+  queryPlan: (id: string, params: Record<string, any> = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (Array.isArray(v)) v.forEach((x) => qs.append(k, String(x)));
+      else if (v !== undefined && v !== '' && v !== null) qs.set(k, String(v));
+    });
+    return get<QueryPlan>(`/v1/databases/collections/${id}/query-plan?${qs}`);
+  },
   documents: (id: string, params: Record<string, any> = {}) => {
     const qs = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '' && v !== null) qs.set(k, String(v)); });

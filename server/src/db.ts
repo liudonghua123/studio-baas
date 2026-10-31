@@ -97,6 +97,11 @@ export function migrate() {
     timezone TEXT, enabled INTEGER DEFAULT 1, nextRunAt TEXT, lastRunAt TEXT, lastStatus TEXT,
     createdAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS collectionIndexes (
+    id TEXT PRIMARY KEY, collectionId TEXT NOT NULL, key TEXT NOT NULL, type TEXT NOT NULL,
+    attributes TEXT NOT NULL, orders TEXT, status TEXT NOT NULL, error TEXT,
+    createdAt TEXT NOT NULL, UNIQUE(collectionId, key)
+  );
   CREATE TABLE IF NOT EXISTS members (
     id TEXT PRIMARY KEY, projectId TEXT NOT NULL, userId TEXT NOT NULL, role TEXT NOT NULL,
     createdAt TEXT NOT NULL, UNIQUE(projectId, userId)

@@ -4,6 +4,7 @@ import {
   listBuckets, listFiles, deleteFile, getFile, deleteBucket,
   listFunctions, getFunction, updateFunction, executeFunction, listExecutions, createFunction,
   listVersions, restoreVersion,
+  listCollectionIndexes, createCollectionIndex, deleteCollectionIndex, explainDocumentQuery,
   listSites, getSite, updateSite, deploySite,
   listUsers, createUser, deleteUser,
   sendMessage, listMessages,
@@ -141,6 +142,85 @@ export const tools: ToolDef[] = [
       if (!c) throw new Error(`Collection "${a.collection}" not found`);
       const attr = addAttribute(c.id, { key: a.key, type: a.type, required: !!a.required, elements: a.elements });
       return { ok: true, collection: c.name, attribute: attr.key, type: attr.type };
+    },
+  },
+  {
+    name: 'list_indexes',
+    description: 'List the indexes of a collection and whether each one is available.',
+    parameters: {
+      type: 'object',
+      properties: { collection: { type: 'string' } },
+      required: ['collection'],
+    },
+    summary: (a) => `查看 ${a.collection} 的索引`,
+    run: (a) => {
+      const c = resolveCollection(a.collection);
+      if (!c) throw new Error(`Collection "${a.collection}" not found`);
+      return listCollectionIndexes(c.id).map((i) => ({
+        key: i.key, type: i.type, attributes: i.attributes, status: i.status, error: i.error,
+      }));
+    },
+  },
+  {
+    name: 'create_index',
+    description: 'Create an index on a collection. Leftmost attributes are used first, so order matters.',
+    parameters: {
+      type: 'object',
+      properties: {
+        collection: { type: 'string' },
+        key: { type: 'string', description: 'Index key, e.g. status_created' },
+        type: { type: 'string', enum: ['key', 'unique'], description: 'Defaults to key' },
+        attributes: { type: 'array', items: { type: 'string' }, description: 'Attribute keys, in order' },
+        orders: { type: 'array', items: { type: 'string', enum: ['ASC', 'DESC'] } },
+      },
+      required: ['collection', 'key', 'attributes'],
+    },
+    summary: (a) => `在 ${a.collection} 上建索引 ${a.key}`,
+    run: (a) => {
+      const c = resolveCollection(a.collection);
+      if (!c) throw new Error(`Collection "${a.collection}" not found`);
+      const idx = createCollectionIndex(c.id, a);
+      return { ok: idx.status === 'available', key: idx.key, type: idx.type, status: idx.status, error: idx.error };
+    },
+  },
+  {
+    name: 'explain_query',
+    description: 'Run EXPLAIN QUERY PLAN for a list query and report whether an index is used.',
+    parameters: {
+      type: 'object',
+      properties: {
+        collection: { type: 'string' },
+        queries: { type: 'array', items: { type: 'string' }, description: 'Appwrite queries, e.g. ["equal(\"status\",\"paid\")"]' },
+      },
+      required: ['collection'],
+    },
+    summary: (a) => `解释 ${a.collection} 的查询计划`,
+    run: (a) => {
+      const c = resolveCollection(a.collection);
+      if (!c) throw new Error(`Collection "${a.collection}" not found`);
+      const p = explainDocumentQuery(c.id, { queries: a.queries || [], limit: 25 });
+      return {
+        verdict: p.fullScan ? 'full table scan' : p.narrowed ? 'index lookup' : 'collection scan',
+        index: p.index, terms: p.terms, tempBTree: p.tempBTree,
+        plan: p.plan.map((x) => x.detail),
+      };
+    },
+  },
+  {
+    name: 'delete_index',
+    description: 'Drop an index from a collection.',
+    parameters: {
+      type: 'object',
+      properties: { collection: { type: 'string' }, key: { type: 'string' } },
+      required: ['collection', 'key'],
+    },
+    summary: (a) => `删除 ${a.collection} 的索引 ${a.key}`,
+    run: (a) => {
+      const c = resolveCollection(a.collection);
+      if (!c) throw new Error(`Collection "${a.collection}" not found`);
+      const idx = listCollectionIndexes(c.id).find((i) => i.key === a.key);
+      if (!idx) throw new Error(`Index "${a.key}" not found`);
+      return { ok: deleteCollectionIndex(c.id, idx.id) };
     },
   },
   {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, now, uid, UPLOAD_DIR } from './db.js';
 import { nextRun } from './cron.js';
+import { createIndex } from './indexes.js';
 import { hashApiKey, newApiKeySecret, previewApiKey } from './apikey.js';
 
 /* --------------------------------------------------------------- helpers */
@@ -785,4 +786,25 @@ export function seedGit() {
     );
   }
   return true;
+}
+
+/**
+ * 演示索引：orders 上建一个复合 key 索引，customers 上建唯一索引。
+ * 这样打开 Databases → Indexes 就能立刻看到「同一个集合里，走索引和全扫的差别」：
+ *   equal("status","paid")                  → Index lookup（命中 status_created 前缀）
+ *   equal("customer","…")                   → Collection scan（只用到 collectionId）
+ * products 故意不建索引，作为对照组。
+ */
+export function seedIndexes() {
+  if (!db.prepare('SELECT 1 FROM collections WHERE id=?').get('col_orders')) return false;
+  const defs: { collectionId: string; key: string; type: 'key' | 'unique'; attributes: string[]; orders: ('ASC' | 'DESC')[] }[] = [
+    { collectionId: 'col_orders', key: 'status_created', type: 'key', attributes: ['status', '$createdAt'], orders: ['ASC', 'DESC'] },
+    { collectionId: 'col_customers', key: 'uniq_email', type: 'unique', attributes: ['email'], orders: ['ASC'] },
+  ];
+  let created = 0;
+  for (const d of defs) {
+    if (db.prepare('SELECT 1 FROM collectionIndexes WHERE collectionId=? AND key=?').get(d.collectionId, d.key)) continue;
+    try { createIndex(d.collectionId, d); created++; } catch { /* 数据里已有重复值时跳过，演示数据不因此崩掉 */ }
+  }
+  return created > 0;
 }
