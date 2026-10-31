@@ -5,6 +5,7 @@ import { db, now, uid, UPLOAD_DIR } from './db.js';
 import { bus } from './events.js';
 import { executeFunctionCode, type ExecContext } from './runtime.js';
 import { currentProjectId } from './context.js';
+import { parseQueries } from './query.js';
 
 /** 当前请求所属项目；store 层所有查询据此隔离 */
 const pid = () => currentProjectId();
@@ -205,19 +206,26 @@ export function validateDocument(collectionId: string, data: Record<string, unkn
 
 export function listDocuments(collectionId: string, opts: {
   limit?: number; offset?: number; search?: string; orderBy?: string; orderType?: 'asc' | 'desc';
+  queries?: unknown;
 } = {}) {
   const col = getCollection(collectionId);
-  if (!col) throw new Error('Collection not found');
-  const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
-  const offset = Math.max(opts.offset ?? 0, 0);
+  if (!col) throw new Error(`Collection "${collectionId}" not found`);
+  // Appwrite 风格查询：equal(...) / orderDesc(...) / limit(...) 等，参数全部走占位符
+  const q = parseQueries(opts.queries);
+  const limit = Math.min(Math.max(q.limit ?? opts.limit ?? 25, 1), 100);
+  const offset = Math.max(q.offset ?? opts.offset ?? 0, 0);
   const where: string[] = ['collectionId=?'];
   const params: any[] = [col.id];
   if (opts.search) {
     where.push('data LIKE ?');
     params.push(`%${opts.search}%`);
   }
+  where.push(...q.where);
+  params.push(...q.params);
   let order = 'createdAt DESC';
-  if (opts.orderBy) {
+  if (q.order) {
+    order = q.order;
+  } else if (opts.orderBy) {
     const dir = opts.orderType === 'asc' ? 'ASC' : 'DESC';
     order = opts.orderBy === '$createdAt' ? `createdAt ${dir}` : `json_extract(data, '$.${opts.orderBy.replace(/[^a-zA-Z0-9_]/g, '')}') ${dir}`;
   }
@@ -225,7 +233,14 @@ export function listDocuments(collectionId: string, opts: {
   const rows = db.prepare(
     `SELECT * FROM documents WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`,
   ).all(...params, limit, offset) as any[];
-  return { total, limit, offset, documents: rows.map(docFromRow) };
+  const documents = rows.map(docFromRow);
+  if (q.select) {
+    const keep = new Set(q.select);
+    for (const d of documents) {
+      d.data = Object.fromEntries(Object.entries(d.data).filter(([k]) => keep.has(k)));
+    }
+  }
+  return { total, limit, offset, documents };
 }
 
 export function getDocument(collectionId: string, docId: string): Doc | null {

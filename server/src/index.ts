@@ -206,6 +206,8 @@ app.get('/v1/databases/collections/:id/documents', guard('databases.read'), wrap
     search: (req.query.search as string) || undefined,
     orderBy: (req.query.orderBy as string) || undefined,
     orderType: (req.query.orderType as 'asc' | 'desc') || 'desc',
+    // ?queries[]=equal("status","paid")&queries[]=orderDesc("createdAt")
+    queries: req.query['queries[]'] ?? req.query.queries,
   });
   res.json(r);
 }));
