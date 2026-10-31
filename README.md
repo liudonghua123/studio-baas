@@ -16,6 +16,8 @@
 
 把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 37 个工具**真实调用**平台 API 而不是只聊天。
 
+界面本身就是产品的一部分：**中英双语**（顶栏一键切换，英文原文即词条 key）与**亮/暗/跟随系统**三档主题，靠一套 CSS 语义变量撑着；切换不刷新页面，也不动你的数据。
+
 资源都是**项目级**的：集合、存储桶、函数、站点、消息、API Key、日志、定时任务、域名、仓库绑定全部挂在 project 下，切换项目就切换整个上下文；每个项目再叠一层 RBAC（owner / admin / developer / viewer × 22 个权限点），人和 API Key 走同一套权限矩阵。
 
 配套文档：
@@ -69,6 +71,18 @@ export default async ({ req, res, log, databases, env }) => {
 
 ![Members & roles](./docs/screenshots/16-members.png)
 
+### 主题与语言：一套令牌撑两套皮肤
+
+顶栏右侧的太阳/月亮按钮切主题，`EN`/`中` 切语言；**Settings → Appearance** 可以把偏好固定下来。首屏由 `index.html` 的内联脚本提前写入 `data-theme`，不会白闪；`localStorage` 记住选择，刷新和切项目都不丢。
+
+![Light theme](./docs/screenshots/30-light-dashboard.png)
+
+所有颜色走语义变量（`--bg` / `--panel` / `--line` / `--w1…w8` / 每类强调色的 text 变体），`:root[data-theme="light"]` 只覆盖变量值，组件里没有一行写死的深色。CodeMirror 在亮色下自动换成浅色高亮，图表 SVG 也跟着变量走。
+
+![Chinese UI](./docs/screenshots/31-dark-zh-dashboard.png)
+
+中文界面不是「整页贴一层翻译」，而是逐句挂词条：英文原文即 key（`t('New project')`），中文条目按页面拆在 `web/src/lib/i18n/zh.*.ts`，缺译回退英文而不是露出裸 key；日期与相对时间（`3m ago` ↔ `3 分钟前`）跟着语言走，字段名、代码、日志原文保持原样。
+
 ### 云函数：像 Appwrite 一样绑定域名、跑定时、连 GitHub
 
 除了在线改代码，函数还具备三项生产环境常见能力：
@@ -115,7 +129,8 @@ export default async ({ req, res, log, databases, env }) => {
 | **Messaging** | Email / SMS / Push 统一发送与投递日志 |
 | **Logs** | 请求日志 SSE 实时 tail、按服务与状态码过滤 |
 | **AI Assistant** | DeepSeek 工具调用（37 个工具）、轨迹可视化、Demo 模式降级 |
-| **Settings** | API Key 作用域管理（明文只返回一次，库里存 SHA-256）、DeepSeek 配置、重置演示数据 |
+| **Settings** | API Key 作用域管理（明文只返回一次，库里存 SHA-256）、DeepSeek 配置、**主题与语言偏好**、重置演示数据 |
+| **Console** | **中英双语切换**、**亮/暗/跟随系统**主题、首屏无闪、日期与相对时间本地化、`pnpm i18n:check` 守门 |
 
 ## 快速开始
 
@@ -179,7 +194,7 @@ export DEEPSEEK_MODEL=deepseek-chat    # 可选
 
 ## 技术栈
 
-- **前端**：React 18、Vite 6、TypeScript、CodeMirror 6、lucide-react、自研设计系统（无 UI 框架）
+- **前端**：React 18、Vite 6、TypeScript、CodeMirror 6、lucide-react、自研设计系统（无 UI 框架，CSS 变量双主题 + 轻量 i18n 运行时）
 - **后端**：Node.js 22、Express 4、TypeScript、better-sqlite3（WAL）、multer
 - **运行时**：`worker_threads` 独立线程 + Node `vm` 沙箱 + 模块白名单 + 超时终止，ESM 转译
 - **实时**：SSE 事件总线（集合、文档、文件、函数、站点变更）

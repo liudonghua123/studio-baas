@@ -115,7 +115,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ---------------------------------------------------------------- core */
-app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.8.0-studio', uptime: process.uptime() }));
+app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.9.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
