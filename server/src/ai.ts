@@ -8,6 +8,11 @@ import {
   sendMessage, listMessages,
   getMetrics, listLogs, createApiKey, getSetting,
 } from './store.js';
+import * as schedulesApi from './schedules.js';
+import * as gitApi from './git.js';
+import * as projectsApi from './projects.js';
+import * as membersApi from './members.js';
+import { currentPrincipal, currentProjectId } from './context.js';
 
 /* ------------------------------------------------------------------- types */
 
@@ -459,6 +464,87 @@ export const tools: ToolDef[] = [
       return { ok: true, name: k.name, secret: k.secret, scopes: k.scopes };
     },
   },
+  {
+    name: 'list_schedules',
+    description: 'List cron schedules of the project with timezone, next run and last status.',
+    parameters: { type: 'object', properties: { function: { type: 'string', description: 'optional: only this function' } } },
+    summary: (a) => (a.function ? `查看 ${a.function} 的定时任务` : '查看定时任务'),
+    run: (a) => {
+      const f = a.function ? resolveFunction(a.function) : null;
+      return schedulesApi.listSchedules(f?.id).map((s) => ({
+        id: s.id, function: s.functionName, cron: s.cron, timezone: s.timezone,
+        enabled: s.enabled, nextRunAt: s.nextRunAt, lastStatus: s.lastStatus, description: s.description,
+      }));
+    },
+  },
+  {
+    name: 'create_schedule',
+    description: 'Schedule a function on a cron expression in a given IANA timezone.',
+    parameters: {
+      type: 'object',
+      properties: {
+        function: { type: 'string' },
+        cron: { type: 'string', description: '5-field cron, e.g. "0 2 * * *"' },
+        timezone: { type: 'string', description: 'IANA zone, defaults to UTC' },
+      },
+      required: ['function', 'cron'],
+    },
+    summary: (a) => `给 ${a.function} 加定时 ${a.cron}`,
+    run: (a) => {
+      const f = resolveFunction(a.function);
+      if (!f) throw new Error(`Function "${a.function}" not found`);
+      const s = schedulesApi.createSchedule(f.id, { cron: a.cron, timezone: a.timezone || 'UTC' });
+      return { ok: true, cron: s.cron, timezone: s.timezone, nextRunAt: s.nextRunAt, description: s.description };
+    },
+  },
+  {
+    name: 'connect_function_repo',
+    description: 'Bind a function to a GitHub repository branch so that pushes deploy it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        function: { type: 'string' },
+        repo: { type: 'string', description: 'owner/repo' },
+        branch: { type: 'string' },
+        path: { type: 'string', description: 'file inside the repo holding the function source' },
+      },
+      required: ['function', 'repo'],
+    },
+    summary: (a) => `把 ${a.function} 接到 ${a.repo}`,
+    run: (a) => {
+      const f = resolveFunction(a.function);
+      if (!f) throw new Error(`Function "${a.function}" not found`);
+      const it = gitApi.connect(f.id, { repo: a.repo, branch: a.branch || 'main', path: a.path });
+      return { ok: true, repo: it.repo, branch: it.branch, path: it.path, webhook: `/v1/git/webhook/${it.id}` };
+    },
+  },
+  {
+    name: 'deploy_function_from_git',
+    description: 'Pull the bound repository file into the function (deploy) and report the commit.',
+    parameters: { type: 'object', properties: { function: { type: 'string' } }, required: ['function'] },
+    summary: (a) => `从 GitHub 部署 ${a.function}`,
+    run: async (a) => {
+      const f = resolveFunction(a.function);
+      if (!f) throw new Error(`Function "${a.function}" not found`);
+      const r = await gitApi.pull(f.id, 'manual');
+      return { ok: true, sha: r.sha, message: r.message, path: r.path, mode: r.mode };
+    },
+  },
+  {
+    name: 'list_projects',
+    description: 'List projects and the current role of the caller in each of them.',
+    parameters: { type: 'object', properties: {} },
+    summary: () => '查看项目',
+    run: () => {
+      const me = currentPrincipal();
+      const here = currentProjectId();
+      return projectsApi.listProjects().map((p) => ({
+        id: p.id, name: p.name, key: p.key, status: p.status,
+        role: me ? membersApi.roleOf(p.id, me.id) : 'owner',
+        current: p.id === here,
+      }));
+    },
+  },
 ];
 
 export const toolMap = new Map(tools.map((t) => [t.name, t]));
@@ -466,7 +552,7 @@ export const toolMap = new Map(tools.map((t) => [t.name, t]));
 /* ------------------------------------------------------------ system prompt */
 
 export const SYSTEM_PROMPT = `你是 Studio BaaS 的 AI 运维助手，由 DeepSeek 驱动。
-你可以通过工具直接操作这个平台的**所有**能力：数据库集合与文档、存储桶与文件、云函数（读取/修改代码、执行）、站点（修改文件、部署）、认证用户、消息推送、API Key、日志与指标。
+你可以通过工具直接操作这个平台的**所有**能力：数据库集合与文档、存储桶与文件、云函数（读取/修改代码、执行、绑定域名、定时任务、GitHub 仓库部署）、站点（修改文件、部署）、认证用户、消息推送、API Key、项目与成员、日志与指标。
 
 工作原则：
 1. 先理解用户意图，需要数据时先调用只读工具（list_* / get_* / get_metrics），再决定是否写入。
@@ -654,6 +740,37 @@ async function demoAgent(history: { role: string; content: string }[]): Promise<
       const r = await toolMap.get('list_files')!.run({});
       add('list_files', {}, r);
       answer = `存储服务共有 **${(r as any[]).length}** 个桶：\n\n| 桶 | 文件数 | 占用 |\n|---|---|---|\n${(r as any[]).map((b) => `| ${b.name} | ${b.files} | ${(b.size / 1024).toFixed(1)} KB |`).join('\n')}`;
+    } else if (want('定时', '调度', 'cron', 'schedule')) {
+      const at = q.match(/(\d{1,2})\s*点/);
+      if (want('加', '创建', '新增', '设置', '每天', '每小时') && (at || want('每天', '每小时'))) {
+        const fn = resolveFunction(q) || listFunctions()[0];
+        const cron = at ? `0 ${Number(at[1])} * * *` : '0 * * * *';
+        const r = await toolMap.get('create_schedule')!.run({ function: fn.name, cron, timezone: 'UTC' });
+        add('create_schedule', { function: fn.name, cron, timezone: 'UTC' }, r);
+        answer = `已给 **${fn.name}** 添加定时任务 \`${cron}\`（UTC），下次执行 **${new Date((r as any).nextRunAt).toISOString().replace('T', ' ').slice(0, 16)}Z**。\n\n调度器每 15 秒扫描一次到期任务，执行记录与手动调用一样完整。`;
+      } else {
+        const r = await toolMap.get('list_schedules')!.run({});
+        add('list_schedules', {}, r);
+        const list = r as any[];
+        const fmt = (iso: string, tz: string) => new Date(iso).toLocaleString('en-GB', {
+          timeZone: tz, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+        });
+        answer = list.length
+          ? `当前项目有 **${list.length}** 个定时任务：\n\n| 函数 | Cron | 时区 | 下次执行 | 上次状态 |\n|---|---|---|---|---|\n${list.map((s) => `| ${s.function} | \`${s.cron}\` | ${s.timezone} | ${s.nextRunAt ? fmt(s.nextRunAt, s.timezone) : '—'} | ${s.lastStatus || '—'} |`).join('\n')}`
+          : '当前项目还没有定时任务。可以说「给 Store analytics 加一个每天 3 点的定时任务」。';
+      }
+    } else if (want('github', '仓库', 'repo')) {
+      const withRepo = listFunctions().find((f) => gitApi.getIntegration(f.id));
+      const fn = resolveFunction(q) || withRepo;
+      if (!fn) {
+        answer = '还没有函数绑定仓库。到 Functions → GitHub 里填写 owner/repo，或者对我说「把 Store analytics 接到 studio-baas/demo-functions」。';
+      } else if (!gitApi.getIntegration(fn.id)) {
+        answer = `**${fn.name}** 还没有绑定仓库。告诉我仓库名（例如 studio-baas/demo-functions），我就把它接上。`;
+      } else {
+        const r = await toolMap.get('deploy_function_from_git')!.run({ function: fn.name });
+        add('deploy_function_from_git', { function: fn.name }, r);
+        answer = `已从仓库拉取并部署 **${fn.name}**：commit \`${(r as any).sha}\` · ${(r as any).message}。\n\n函数代码已被远端文件覆盖，可以直接 Execute 验证。`;
+      }
     } else {
       const m = await toolMap.get('get_metrics')!.run({});
       add('get_metrics', {}, m);
