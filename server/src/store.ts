@@ -414,11 +414,21 @@ export function createFunction(input: { name: string; runtime?: string; code?: s
   return getFunction(id)!;
 }
 
-export function updateFunction(id: string, patch: Partial<{ name: string; code: string; env: Record<string, string>; timeout: number; enabled: boolean; schedule: string; runtime: string; entrypoint: string }>) {
+export function updateFunction(id: string, patch: Partial<{
+  name: string; code: string; env: Record<string, string>; timeout: number; enabled: boolean;
+  schedule: string; runtime: string; entrypoint: string;
+  /** Appwrite 风格的变量数组，等价于 env 对象 */
+  variables: { key: string; value: string }[];
+}>) {
   const cur = getFunction(id);
   if (!cur) return null;
+  // 同时接受 { env: {K:V} } 与 Appwrite 的 variables: [{key,value}]
+  const env = patch.env
+    ?? (Array.isArray(patch.variables)
+      ? Object.fromEntries(patch.variables.filter((v) => v && v.key).map((v) => [String(v.key), String(v.value ?? '')]))
+      : cur.env);
   db.prepare(`UPDATE functions SET name=?,code=?,env=?,timeout=?,enabled=?,schedule=?,runtime=?,entrypoint=?,updatedAt=? WHERE id=?`).run(
-    patch.name ?? cur.name, patch.code ?? cur.code, JSON.stringify(patch.env ?? cur.env),
+    patch.name ?? cur.name, patch.code ?? cur.code, JSON.stringify(env),
     patch.timeout ?? cur.timeout, (patch.enabled ?? cur.enabled) ? 1 : 0,
     patch.schedule ?? cur.schedule, patch.runtime ?? cur.runtime, patch.entrypoint ?? cur.entrypoint, now(), id,
   );
