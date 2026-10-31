@@ -300,8 +300,31 @@ app.get('/v1/storage/buckets/:id/files', guard('storage.read'), wrap((req, res) 
   res.json({ total: store.listFiles(req.params.id).length, files: store.listFiles(req.params.id) });
 }));
 
-app.post('/v1/storage/buckets/:id/files', guard('storage.write'), upload.single('file'), wrap((req, res) => {
-  if (!req.file) return fail(res, new Error('No file uploaded'));
+/**
+ * 上传超限的早期拒绝。
+ *
+ * 原来的路径是「收完整个文件 → saveFile 发现超限 → 400」。文件大到几 MB 时，
+ * 服务端在响应后立刻关连接，而客户端还在写，于是它拿到的是 broken pipe（EPIPE）
+ * 而不是 413——CI 上就复现过。这里按 content-length 提前判断，并把剩余请求体
+ * `resume()` 读掉丢弃，让客户端能正常收到 413 与错误文案。
+ */
+const rejectOversizedUpload: express.RequestHandler = (req, res, next) => {
+  const bucket = store.getBucket(req.params.id);
+  const declared = Number(req.headers['content-length'] || 0);
+  if (bucket && declared > bucket.maxFileSize) {
+    req.resume();
+    res.setHeader('Connection', 'close');
+    return res.status(413).json({
+      ok: false,
+      error: `File exceeds bucket limit of ${bucket.maxFileSize} bytes`,
+      maxFileSize: bucket.maxFileSize,
+    });
+  }
+  next();
+};
+
+app.post('/v1/storage/buckets/:id/files', guard('storage.write'), rejectOversizedUpload, upload.single('file'), wrap((req, res) => {
+  if (!req.file) return fail(res, new Error('No file uploaded — send multipart/form-data with a "file" field'));
   res.status(201).json(store.saveFile(req.params.id, req.file));
 }));
 
@@ -654,6 +677,10 @@ app.use('/v1', (req, res) => {
 });
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // multer 的硬上限（12MB）走的是这里，给 413 而不是 500
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ ok: false, error: 'Upload exceeds the 12 MB hard limit' });
+  }
   console.error(err);
   res.status(500).json({ ok: false, error: err?.message || 'Internal error' });
 });

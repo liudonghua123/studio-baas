@@ -215,12 +215,19 @@ if bid:
         s, again, _ = call('GET', f'/v1/storage/files/{fid}/view')
         check('storage', 'deleted file 404', s == 404, f'{s}')
 
+    # 必须是真 multipart：早先这里发的是 octet-stream，multer 解析不出文件，
+    # 断言实际测的是「没有文件」而不是「文件过大」，一直误报到 CI 才发现。
     big = b'x' * (6 * 1024 * 1024)
-    s, fb, _ = call('POST', f'/v1/storage/buckets/{bid}/files', raw=big, ctype='application/octet-stream',
-                    headers={'x-filename': 'big.bin', 'content-type': 'application/octet-stream'})
-    check('storage', 'bucket max size enforced', s in (400, 413), f'{s} {str(fb)[:120]}')
-    if s in (200, 201):
-        note('storage', 'maxFileSize not enforced', f'bucket says 5MB, accepted 6MB (status {s})')
+    bnd = '----deepbig'
+    bigbody = (f'--{bnd}\r\nContent-Disposition: form-data; name="file"; filename="big.bin"\r\n'
+               f'Content-Type: application/octet-stream\r\n\r\n').encode() + big + f'\r\n--{bnd}--\r\n'.encode()
+    s, fb, _ = call('POST', f'/v1/storage/buckets/{bid}/files', raw=bigbody,
+                    ctype=f'multipart/form-data; boundary={bnd}')
+    check('storage', 'bucket max size enforced', s == 413, f'{s} {str(fb)[:160]}')
+    s2, fl, _ = call('GET', f'/v1/storage/buckets/{bid}/files')
+    check('storage', 'oversized upload is not stored',
+          s2 == 200 and not any(f['name'] == 'big.bin' for f in fl.get('files', [])),
+          f'{[f["name"] for f in fl.get("files", [])]}')
 
 # -------------------------------------------------------------- 6 functions
 s, fn, _ = call('POST', '/v1/functions', {'name': f'Deep fn {TAG}', 'runtime': 'node-22', 'entrypoint': 'src/main.js'})

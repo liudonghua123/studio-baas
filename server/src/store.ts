@@ -477,6 +477,17 @@ export function listBuckets() {
   }));
 }
 
+export function getBucket(id: string) {
+  const r = db.prepare('SELECT * FROM buckets WHERE id=? AND projectId=?').get(id, pid()) as any;
+  if (!r) return null;
+  return {
+    id: r.id, name: r.name, maxFileSize: r.maxFileSize,
+    allowedExtensions: safeJson<string[]>(r.allowedExtensions, []),
+    compression: r.compression || 'none', encryption: !!r.encryption,
+    imageTransform: !!r.imageTransform, createdAt: r.createdAt,
+  };
+}
+
 export function createBucket(input: { name: string; maxFileSize?: number; allowedExtensions?: string[]; compression?: string; encryption?: boolean; imageTransform?: boolean }) {
   const id = uid('bkt_');
   db.prepare(`INSERT INTO buckets (id,name,maxFileSize,allowedExtensions,compression,encryption,imageTransform,createdAt,projectId)
