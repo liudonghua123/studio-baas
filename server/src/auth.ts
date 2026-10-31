@@ -31,7 +31,13 @@ export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'):
         projectId: row.projectId || undefined,
       };
     }
-    return { principal: { type: 'key', id: 'invalid', name: 'Invalid key', scopes: [] } };
+    // 带了 key 但查不到：可能是删除/轮换过的 key，必须 401 而不是当成“无权限身份”
+    return {
+      principal: {
+        type: 'key', id: 'invalid', name: 'Invalid key', scopes: [],
+        invalid: true, invalidReason: 'Invalid or revoked API key',
+      },
+    };
   }
 
   const session = req.header('x-studio-session');
@@ -48,6 +54,13 @@ export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'):
         },
       };
     }
+    // 会话过期/不存在时不能悄悄回退成 demo owner，否则等于绕过登录
+    return {
+      principal: {
+        type: 'user', id: 'invalid', name: 'Expired session',
+        invalid: true, invalidReason: 'Session expired, please sign in again',
+      },
+    };
   }
 
   const actAs = req.header('x-studio-act-as');
@@ -94,6 +107,12 @@ export function can(permission: string, principal: Principal | null = currentPri
 export function guard(permission: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const principal = currentPrincipal();
+    if (principal?.invalid) {
+      return res.status(401).json({
+        ok: false, code: 'unauthenticated',
+        error: principal.invalidReason || 'Invalid credentials',
+      });
+    }
     if (!principal) {
       return res.status(401).json({ ok: false, code: 'unauthenticated', error: 'Authentication required' });
     }

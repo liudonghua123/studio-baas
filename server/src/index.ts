@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate, db, now } from './db.js';
-import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit } from './seed.js';
+import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit, seedDomains } from './seed.js';
 import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
@@ -16,6 +16,7 @@ import * as members from './members.js';
 import * as domains from './domains.js';
 import * as schedules from './schedules.js';
 import * as git from './git.js';
+import { rateLimit, startRateLimitSweeper } from './ratelimit.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,7 @@ seedDemoProject();
 seedMembers();
 seedSchedules();
 seedGit();
+seedDomains();
 
 const app = express();
 app.use(cors());
@@ -61,8 +63,12 @@ const wrap = (fn: (req: express.Request, res: express.Response) => Promise<any> 
       }
     } catch (e) { fail(res, e); }
   };
-const fail = (res: express.Response, e: any, code = 400) =>
-  res.status(code).json({ ok: false, error: e?.message || String(e) });
+const fail = (res: express.Response, e: any, code?: number) => {
+  const msg = e?.message || String(e);
+  // 领域错误统一走 400，但 “xxx not found” 应该是 404，否则客户端无法区分参数错误与资源缺失
+  const status = code ?? (/not found/i.test(msg) ? 404 : 400);
+  res.status(status).json({ ok: false, error: msg });
+};
 
 /* ----------------------------------------------------------- request logs */
 const SKIP_LOG = ['/v1/metrics', '/v1/realtime', '/v1/logs', '/v1/ai/status', '/v1/project', '/v1/health', '/v1/docs'];
@@ -281,16 +287,22 @@ app.patch('/v1/functions/:id', guard('functions.write'), wrap((req, res) => {
 
 app.delete('/v1/functions/:id', guard('functions.write'), wrap((req, res) => res.json({ ok: store.deleteFunction(req.params.id) })));
 
-app.post('/v1/functions/:id/executions', guard('functions.execute'), wrap(async (req, res) => {
+app.post('/v1/functions/:id/executions', guard('functions.execute'),
+  rateLimit({ windowMs: 60_000, max: 120, message: 'Execution rate limit reached (120/min per project)' }),
+  wrap(async (req, res) => {
   const r = await store.executeFunction(req.params.id, req.body ?? {}, 'manual');
   res.json(r);
 }));
 
 app.get('/v1/functions/:id/executions', guard('functions.read'), wrap((req, res) => {
-  res.json({ total: 0, executions: store.listExecutions(req.params.id, 20) });
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+  res.json({ total: store.countExecutions(req.params.id), executions: store.listExecutions(req.params.id, limit) });
 }));
 
-app.get('/v1/executions', guard('functions.read'), (_req, res) => res.json({ executions: store.listExecutions(undefined, 30) }));
+app.get('/v1/executions', guard('functions.read'), (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 30, 200);
+  res.json({ total: store.countExecutions(), executions: store.listExecutions(undefined, limit) });
+});
 
 /* ----------------------------------------------------- function schedules */
 app.get('/v1/schedules', guard('functions.read'), (_req, res) => {
@@ -453,7 +465,13 @@ app.patch('/v1/users/:id', guard('users.write'), wrap((req, res) => {
 
 app.delete('/v1/users/:id', guard('users.write'), wrap((req, res) => res.json({ ok: store.deleteUser(req.params.id) })));
 
-app.post('/v1/account/sessions', wrap((req, res) => {
+app.post('/v1/account/sessions',
+  rateLimit({
+    windowMs: 60_000, max: 8,
+    keyOf: (r) => String(r.body?.email || '').toLowerCase(),
+    message: 'Too many sign-in attempts, wait a minute before retrying',
+  }),
+  wrap((req, res) => {
   const { email, password } = req.body || {};
   res.status(201).json(store.login(email, password));
 }));
@@ -564,12 +582,18 @@ if (fs.existsSync(WEB_DIST)) {
   });
 }
 
+// 未匹配的 /v1 路由统一返回 JSON，避免前端拿到 express 的 HTML 错误页
+app.use('/v1', (req, res) => {
+  res.status(404).json({ ok: false, code: 'route_not_found', error: `No route for ${req.method} ${req.originalUrl}` });
+});
+
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
   res.status(500).json({ ok: false, error: err?.message || 'Internal error' });
 });
 
 schedules.startScheduler();
+startRateLimitSweeper();
 
 const PORT = Number(process.env.PORT) || 5174;
 app.listen(PORT, '0.0.0.0', () => {

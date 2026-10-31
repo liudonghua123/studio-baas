@@ -11,6 +11,9 @@ export interface Principal {
   name: string;
   role?: string;           // 用户在该项目中的角色
   scopes?: string[];       // API Key 的权限点
+  /** 携带了凭据但无效（key 已删除、会话过期）时为 true，路由层据此返回 401 */
+  invalid?: boolean;
+  invalidReason?: string;
 }
 
 export interface RequestContext {

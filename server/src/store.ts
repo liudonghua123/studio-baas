@@ -37,6 +37,12 @@ const safeJson = <T,>(s: string | null | undefined, fallback: T): T => {
   try { return JSON.parse(s) as T; } catch { return fallback; }
 };
 
+/** 文档元字段，作为属性名会与 API 返回结构冲突 */
+const RESERVED_KEYS = new Set([
+  'id', 'data', 'permissions', 'createdAt', 'updatedAt',
+  '$id', '$createdAt', '$updatedAt', '$permissions', '$collectionId',
+]);
+
 /* ------------------------------------------------------------- collections */
 
 export function listCollections(withStats = true): Collection[] {
@@ -118,12 +124,26 @@ export function deleteCollection(id: string): boolean {
   return true;
 }
 
+export const ATTRIBUTE_TYPES: AttributeType[] = ['string', 'email', 'integer', 'float', 'boolean', 'datetime', 'url', 'enum', 'text'];
+
 export function addAttribute(collectionId: string, input: {
   key: string; type: AttributeType; required?: boolean; array?: boolean;
   size?: number; defaultVal?: string; elements?: string[];
 }): Attribute {
   if (!getCollection(collectionId)) throw new Error('Collection not found');
   if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(input.key)) throw new Error('Attribute key must be alphanumeric');
+  if (RESERVED_KEYS.has(input.key)) throw new Error(`"${input.key}" is a reserved key`);
+  if (!ATTRIBUTE_TYPES.includes(input.type)) {
+    throw new Error(`Unknown attribute type "${input.type}". Expected one of: ${ATTRIBUTE_TYPES.join(', ')}`);
+  }
+  if (listAttributes(collectionId).some((a) => a.key === input.key)) {
+    throw new Error(`Attribute "${input.key}" already exists in this collection`);
+  }
+  if (input.type === 'enum') {
+    const els = input.elements ?? [];
+    if (!els.length) throw new Error('Enum attributes need at least one element');
+    if (els.some((e) => typeof e !== 'string' || !e.trim())) throw new Error('Enum elements must be non-empty strings');
+  }
   const id = uid('attr_');
   db.prepare(`INSERT INTO attributes (id,collectionId,key,type,required,array,size,defaultVal,elements,createdAt)
     VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
@@ -422,6 +442,13 @@ export function deleteFunction(id: string) {
   return true;
 }
 
+export function countExecutions(functionId?: string): number {
+  const row = functionId
+    ? db.prepare('SELECT COUNT(*) c FROM executions WHERE functionId=? AND projectId=?').get(functionId, pid())
+    : db.prepare('SELECT COUNT(*) c FROM executions WHERE projectId=?').get(pid());
+  return (row as any)?.c || 0;
+}
+
 export function listExecutions(functionId?: string, limit = 30) {
   const rows = functionId
     ? db.prepare('SELECT * FROM executions WHERE functionId=? AND projectId=? ORDER BY createdAt DESC LIMIT ?').all(functionId, pid(), limit)
@@ -580,13 +607,42 @@ export function siteFile(siteId: string, filePath: string) {
   const site = getSite(siteId);
   if (!site) return null;
   const clean = decodeURIComponent(filePath || '').replace(/^\/+/, '') || site.entrypoint;
-  const f = site.files.find((x) => x.path === clean) || site.files.find((x) => x.path === site.entrypoint) || site.files[0];
-  return f || null;
+  const exact = site.files.find((x) => x.path === clean);
+  if (exact) return exact;
+  // 只有「看起来像页面路由」的路径才回退到入口 HTML（SPA 前端路由）；
+  // 缺失的静态资源（/logo.png、/app.js）必须 404，否则浏览器会拿到 HTML 当脚本执行
+  const last = clean.split('/').pop() || '';
+  if (!last.includes('.') || clean.endsWith('/')) {
+    return site.files.find((x) => x.path === site.entrypoint) || site.files[0] || null;
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------- users */
 
-const hashPassword = (pw: string) => crypto.scryptSync(pw, 'studio-salt', 32).toString('hex');
+/**
+ * 口令哈希：每个用户独立随机盐，格式 `scrypt$<salt>$<hash>`。
+ * 旧数据是「固定盐 + 纯 hash」，验证通过后会在登录时自动升级为新格式。
+ */
+const hashPassword = (pw: string, salt = crypto.randomBytes(16).toString('hex')) =>
+  `scrypt$${salt}$${crypto.scryptSync(pw, salt, 32).toString('hex')}`;
+
+const safeEqual = (a: string, b: string) => {
+  const ba = Buffer.from(a, 'hex');
+  const bb = Buffer.from(b, 'hex');
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+};
+
+function verifyPassword(pw: string, stored: string | null): boolean {
+  if (!stored) return false;
+  if (stored.startsWith('scrypt$')) {
+    const [, salt, hash] = stored.split('$');
+    if (!salt || !hash) return false;
+    return safeEqual(crypto.scryptSync(pw, salt, 32).toString('hex'), hash);
+  }
+  // 兼容历史固定盐格式
+  return safeEqual(crypto.scryptSync(pw, 'studio-salt', 32).toString('hex'), stored);
+}
 
 export function listUsers() {
   const rows = db.prepare('SELECT * FROM users ORDER BY createdAt DESC').all() as any[];
@@ -632,9 +688,13 @@ export function deleteUser(id: string) {
 }
 
 export function login(email: string, password: string) {
-  const u = db.prepare('SELECT * FROM users WHERE email=?').get(email.toLowerCase()) as any;
+  const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').toLowerCase()) as any;
   if (!u) throw new Error('Invalid credentials');
-  if (u.passwordHash !== hashPassword(password)) throw new Error('Invalid credentials');
+  if (!verifyPassword(password, u.passwordHash)) throw new Error('Invalid credentials');
+  if (!String(u.passwordHash || '').startsWith('scrypt$')) {
+    // 登录成功时顺手把旧哈希升级为「每用户盐」格式
+    db.prepare('UPDATE users SET passwordHash=? WHERE id=?').run(hashPassword(password), u.id);
+  }
   const id = uid('sess_');
   const secret = crypto.randomBytes(24).toString('hex');
   const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
