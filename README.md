@@ -125,6 +125,32 @@ export default async ({ req, res, log, databases, env }) => {
 
 `document.*`、`function.*`、`site.*`、`user.*` 等事件可以订阅到任意 HTTP 端点。每次投递带 `X-Studio-Signature: t=<unix>,v1=<hmac>`（签名覆盖 `"{t}.{body}"`，防重放），5 秒超时，5xx 与超时最多重试 3 次，记录里能看到状态码、耗时与尝试次数。签名密钥只在创建/轮换时返回一次。
 
+### 单点登录：把公司目录接到门口
+
+![Sign in](./docs/screenshots/37-sso-login.png)
+
+控制台登录页直接列出这个项目开好的身份源：点一下就走 IdP，回来已经是登录状态。四种协议共用一条落库路径（`issueSession`），所以密码登录和 SSO 登录的会话语义完全一致。
+
+- **OIDC**：`discovery` 自动取端点与 JWKS，`id_token` 做 RS256/ES256 验签，校验 `iss` / `aud` / `exp` / `nonce`；支持 PKCE（S256）。
+- **OAuth 2.0**：纯授权码流程，`userinfo` 取资料，`client_secret` 可放表单或 Basic。
+- **CAS**：2.0 / 3.0 服务票据，`service` 逐字比对，ticket 一次性消费；3.0 的属性会映射成姓名与邮箱。
+- **LDAP / AD**：先服务账号搜人，再**用这个人自己的 DN + 密码重新 bind**。空密码直接拒绝（否则等于匿名绑定），过滤器里的用户名按 RFC 4515 转义。
+
+![Identity providers](./docs/screenshots/38-sso-providers.png)
+
+```bash
+# 配置一个 OIDC 源（管理员权限）
+curl -X POST localhost:5174/v1/auth/sso/config -H 'content-type: application/json' -d '{
+  "type":"oidc","name":"Company SSO","defaultRole":"developer",
+  "config":{"issuer":"https://keycloak.corp.example/realms/acme","clientId":"studio","clientSecret":"…"}
+}'
+
+# 拿授权地址（前端随后跳转），回调落在 /login#secret=…
+curl -X POST localhost:5174/v1/auth/sso/<id>/start -H 'origin: http://localhost:5173' -d '{"returnTo":"/databases"}'
+```
+
+**安全默认值**：`state` 一次性、10 分钟过期，PKCE 自带，`redirect_uri` 与换取 token 时逐字一致；会话票据走 URL fragment（不进服务端日志、不外泄 Referer）；`clientSecret` / `bindPassword` 用 AES-256-GCM 加密落库，接口只回 `••••1234`；同邮箱并入已有账号**只在 IdP 声明 `email_verified` 时**发生；`returnTo` 只接受站内相对路径。
+
 ## 功能一览
 
 | 模块 | 能力 |
@@ -140,6 +166,7 @@ export default async ({ req, res, log, databases, env }) => {
 | **Members** | 4 种角色 × 22 个权限点、邀请/改角色/移除、以角色预览、权限矩阵 |
 | **Sites** | 多文件在线编辑、iframe 实时预览、三档视口、防抖自动保存、部署与构建日志 |
 | **Auth** | 用户 CRUD、active / unverified / blocked、标签、scrypt 密码、会话登录 |
+| **SSO** | **OIDC（discovery + JWKS 验签 + PKCE）**、**OAuth 2.0**、**CAS 2.0/3.0**、**LDAP / AD bind**、登录页自动列源、连接测试、默认角色、邮箱域白名单 |
 | **Messaging** | Email / SMS / Push 统一发送与投递日志 |
 | **Logs** | 请求日志 SSE 实时 tail、按服务与状态码过滤 |
 | **Webhooks** | 事件订阅、HMAC-SHA256 签名、失败重试、投递记录、密钥轮换 |
@@ -213,6 +240,9 @@ export AI_BASE_URL=https://api.deepseek.com   # 可选，走网关时填
 | `AI_MODEL` | provider 默认 | 覆盖模型名 |
 | `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `AI_API_KEY` | — | 任一存在即可；都没有则进入 Demo 模式 |
 | `AI_APPROVAL` | `on` | 设为 `off` 时写操作不再请人确认（不建议） |
+| `STUDIO_SECRET_KEY` | 自动生成 `data/.secret-key` | 加密 SSO 密钥的主密钥（32 字节 hex/base64，或口令派生） |
+| `STUDIO_API_URL` | 由请求推断 | 反代后面用来拼 `redirect_uri` 的公网 API 地址 |
+| `STUDIO_APP_URL` | 由请求 Origin 推断 | SSO 登录成功后的回跳地址 |
 | `DOMAIN_VERIFY_MODE` | `simulate` | `strict` 时用真实 DNS 查 TXT 记录 |
 | `GIT_MODE` | `simulate` | `live` 时调用真实 GitHub REST API |
 
@@ -243,6 +273,8 @@ studio-baas/
 │   ├── ai.ts                  # 工具注册 + 本地规则引擎
 │   ├── agent/                 # provider 抽象、agent 循环、会话、权限映射
 │   ├── webhooks.ts            # 事件订阅与签名投递
+│   ├── secrets.ts             # AES-256-GCM 静态加密
+│   ├── sso/                   # 身份源：providers / flow / routes / jwt / ldap / ber
 │   ├── seed.ts                # 演示数据
 │   └── events.ts              # SSE 事件总线
 └── web/src/
@@ -286,6 +318,13 @@ studio-baas/
 | GET/POST | `/v1/users` | 用户列表 / 创建 |
 | POST | `/v1/messaging/messages` | 发送消息 |
 | POST | `/v1/ai/chat` | AI 对话（含工具轨迹） |
+| GET | `/v1/auth/sso/providers` | 登录页：可用的身份源（只含 id/type/name） |
+| GET/POST | `/v1/auth/sso/config` | 身份源列表 / 新增（`sso.read` / `sso.write`） |
+| PATCH/DELETE | `/v1/auth/sso/config/:id` | 修改 / 删除（连带身份映射） |
+| POST | `/v1/auth/sso/config/:id/test` | 测试连接（discovery / CAS 登录页 / LDAP bind） |
+| POST | `/v1/auth/sso/:id/start` | 拿授权地址与 state |
+| GET | `/v1/auth/sso/:id/callback` | IdP 回调 → 302 到 `/login#secret=…` |
+| POST | `/v1/auth/sso/:id/login` | LDAP 用户名密码登录 |
 | GET | `/v1/realtime` | SSE 事件流 |
 
 ## 安全说明
@@ -297,6 +336,8 @@ studio-baas/
 - 开启集合的 **document security** 后，`read("any" | "users" | "user:<id>" | "team:<id>/<role>")` 会在列表、单条读取、更新、删除四处生效；无 read 权限时单条返回 404，不泄漏存在性；
 - 云函数跑在独立的 `worker_threads` 线程里，超时直接 `terminate()`，死循环不会再拖垮 API（仍是共享内核，不是容器级隔离）；
 - API Key 只存 SHA-256 摘要，明文仅在创建响应里出现一次，列表只显示预览；
+- SSO 的 `clientSecret` / `bindPassword` 以 AES-256-GCM 密文入库，密钥来自 `STUDIO_SECRET_KEY` 或 `data/.secret-key`（0600）；接口只返回「已配置 + 尾号」，编辑时留空表示不修改；
+- 外部身份只在两种情况下并入已有账号：该 `(providerId, subject)` 之前绑定过，或 IdP 明确声明邮箱已验证且管理员开启了 `trustEmail` —— 否则一个同名邮箱就能接管本地管理员；
 - 文件存于本地 `server/data/uploads`，桶加密标记仅为元数据；GitHub token 只存服务端、不回传前端；
 - `x-studio-act-as`（View as role）仅供演示：无凭据时可声明任意角色；**带会话时只能往下看，不能自我提权**；公网部署建议 `STUDIO_ALLOW_ACT_AS=0` 关掉；
 - 不带任何凭据的请求仍按「演示 owner」放行，这是本地体验的取舍——真要上线请把它改成 401；
