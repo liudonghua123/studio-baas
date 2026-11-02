@@ -90,7 +90,8 @@ s, mem, _ = call('GET', '/v1/members')
 check('members', 'member list includes caller', s == 200 and (mem.get('me') or {}).get('role') == 'owner', f'{s} {str(mem)[:160]}')
 
 email = f'deep-{TAG}@example.com'
-call('POST', '/v1/users', {'email': email, 'name': 'Deep Member', 'password': 'Passw0rd!'})
+s, mu, _ = call('POST', '/v1/users', {'email': email, 'name': 'Deep Member', 'password': 'Passw0rd!'})
+muid = mu.get('id') if s == 201 else None
 s, m1, _ = call('POST', '/v1/members', {'email': email, 'role': 'developer'})
 check('members', 'invite member', s == 201, f'{s} {m1}')
 mid = m1.get('id') if s == 201 else None
@@ -636,7 +637,10 @@ check('ai', 'viewer cannot delete through the agent',
 _srv.shutdown()
 
 # ------------------------------------------------------------------ cleanup
-for path in [f'/v1/databases/collections/{bcid}' if bcid else None,
+# Users are global (not project-scoped), so they do not disappear with the project.
+for path in [f'/v1/users/{uid_}' if uid_ else None,
+             f'/v1/users/{muid}' if muid else None,
+             f'/v1/databases/collections/{bcid}' if bcid else None,
              f'/v1/functions/{fnid}' if fnid else None,
              f'/v1/sites/{sid}' if sid else None,
              f'/v1/storage/buckets/{bid}' if bid else None,
