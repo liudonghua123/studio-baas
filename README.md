@@ -14,7 +14,7 @@
 
 ## 这是什么
 
-把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 37 个工具**真实调用**平台 API 而不是只聊天。
+把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 48 个工具**真实调用**平台 API 而不是只聊天，写操作在执行前必须由人确认。
 
 界面本身就是产品的一部分：**中英双语**（顶栏一键切换，英文原文即词条 key）与**亮/暗/跟随系统**三档主题，靠一套 CSS 语义变量撑着；切换不刷新页面，也不动你的数据。
 
@@ -99,24 +99,38 @@ export default async ({ req, res, log, databases, env }) => {
 
 ![GitHub integration](./docs/screenshots/19-function-github.png)
 
-### AI 助手：37 个工具，覆盖全部服务
+### AI 助手：48 个工具，写操作要人点头
 
-![AI assistant](./docs/screenshots/12-ai-assistant.png)
+![AI conversations](./docs/screenshots/34-ai-conversations.png)
 
-对话下方展示**工具轨迹**（名称、参数、结果、耗时）；没有 Key 时降级为本地规则引擎，仍然执行真实工具调用。
+助手跑在一条**有审批关卡的 agent 循环**里：模型选工具 → 只读的立刻执行 → 要改数据的先停下来等人确认 → 结果回灌模型继续规划，最多 8 轮。回复是流式的，工具卡片会从转圈变成耗时与结果，不用等整段生成完。
+
+- **会话持久化**：每个项目一份会话列表，刷新、切项目、换设备都还在；标题取首条消息，可重命名/删除。
+- **审批**：`create_*` / `delete_*` / `update_*` / `deploy_*` / `execute_*` / `send_message` 等 28 个写工具默认挂起，前端弹出参数卡片，批准后从断点继续 —— 不会重新问模型，也就不会给出一个你没批准过的计划。
+- **RBAC 不绕过**：工具清单按当前角色过滤，`viewer` 看不到也调不动删除类工具；demo 规则引擎走同一道闸。
+- **多provider**：DeepSeek / OpenAI / Ollama / 任意 OpenAI 兼容网关，改 `AI_PROVIDER` 或 Settings 里的下拉即可，上层代码无感。
+- **没 Key 也能用**：降级到本地规则引擎，仍然执行真实工具调用，只是规划能力有限。
+
+![Approval gate](./docs/screenshots/35-ai-approval.png)
 
 ```text
-你：执行 Store analytics 函数并解释结果
-→ execute_function({"name":"Store analytics"})      1ms  ✓
-← revenue 2770.45 / orders 9 / 库存告急 3 个 SKU
+你：执行 Store analytics 函数
+→ execute_function({"function":"Store analytics"})   26ms  ✓
+← revenue=2518 · orders=8 · products=12
 ```
+
+### Webhooks：事件出站
+
+![Webhooks](./docs/screenshots/36-webhooks.png)
+
+`document.*`、`function.*`、`site.*`、`user.*` 等事件可以订阅到任意 HTTP 端点。每次投递带 `X-Studio-Signature: t=<unix>,v1=<hmac>`（签名覆盖 `"{t}.{body}"`，防重放），5 秒超时，5xx 与超时最多重试 3 次，记录里能看到状态码、耗时与尝试次数。签名密钥只在创建/轮换时返回一次。
 
 ## 功能一览
 
 | 模块 | 能力 |
 |---|---|
 | **Dashboard** | 文档/文件/函数/用户指标、14 天流量趋势、服务健康、最近执行、集合分布 |
-| **Databases** | 集合与 9 种类型化属性、文档 CRUD、Appwrite 风格 `queries[]` 过滤、文档级权限（`read("user:…")` / `team:…/role`）、**key/unique 索引 + EXPLAIN 查询计划**、表单与 JSON 双模式编辑 |
+| **Databases** | 集合与 9 种类型化属性、文档 CRUD、**原子批量写入（≤500 行）**、Appwrite 风格 `queries[]` 过滤、文档级权限（`read("user:…")` / `team:…/role`）、**key/unique 索引 + EXPLAIN 查询计划**、表单与 JSON 双模式编辑 |
 | **Storage** | 多桶、扩展名白名单、体积限制、拖拽上传、图片预览、直链分享 |
 | **Functions** | 在线编辑（CodeMirror 6）、**每次保存即不可变版本 + 一键回滚**、自定义 payload 执行、**worker 线程隔离执行**、日志/响应/错误、环境变量、执行历史 |
 | **Domains** | 自定义域名、TXT 校验、证书签发状态、Host 头路由、`DOMAIN_VERIFY_MODE` 真实校验 |
@@ -128,8 +142,9 @@ export default async ({ req, res, log, databases, env }) => {
 | **Auth** | 用户 CRUD、active / unverified / blocked、标签、scrypt 密码、会话登录 |
 | **Messaging** | Email / SMS / Push 统一发送与投递日志 |
 | **Logs** | 请求日志 SSE 实时 tail、按服务与状态码过滤 |
-| **AI Assistant** | DeepSeek 工具调用（37 个工具）、轨迹可视化、Demo 模式降级 |
-| **Settings** | API Key 作用域管理（明文只返回一次，库里存 SHA-256）、DeepSeek 配置、**主题与语言偏好**、重置演示数据 |
+| **Webhooks** | 事件订阅、HMAC-SHA256 签名、失败重试、投递记录、密钥轮换 |
+| **AI Assistant** | 48 个工具的 agent 循环、**流式输出**、**会话持久化**、**写操作审批**、轨迹可视化、多 provider、Demo 降级 |
+| **Settings** | API Key 作用域管理（明文只返回一次，库里存 SHA-256）、**AI provider / 模型 / Base URL / 密钥**、**主题与语言偏好**、重置演示数据 |
 | **Console** | **中英双语切换**、**亮/暗/跟随系统**主题、首屏无闪、日期与相对时间本地化、`pnpm i18n:check` 守门 |
 
 ## 快速开始
@@ -171,14 +186,20 @@ pnpm tunnel:prod   # 生产模式，隧道指向 :5174
 
 ![Webhook over the tunnel](./docs/screenshots/20b-tunnel-webhook.png)
 
-## 配置 DeepSeek
+## 配置 AI
+
+默认走 DeepSeek，也可以换成任何 OpenAI 兼容端点：
 
 ```bash
-export DEEPSEEK_API_KEY=sk-xxxxxxxx
-export DEEPSEEK_MODEL=deepseek-chat    # 可选
+export AI_PROVIDER=deepseek            # deepseek | openai | ollama | custom
+export DEEPSEEK_API_KEY=sk-xxxxxxxx    # 或 OPENAI_API_KEY / AI_API_KEY
+export AI_MODEL=deepseek-chat          # 可选，覆盖 provider 默认模型
+export AI_BASE_URL=https://api.deepseek.com   # 可选，走网关时填
 ```
 
-或在 **Settings → AI operator** 中填写（环境变量优先）。未配置时进入 Demo 模式：规则引擎解析中文意图，照样执行真实工具调用，回复中会标注当前模式。
+同样可以在 **Settings → AI operator** 里选服务商、填模型与 Base URL（环境变量优先）。Ollama 这类本地服务不需要密钥。
+
+未配置时进入 Demo 模式：规则引擎解析中文意图，照样执行真实工具调用，回复中会标注当前模式。
 
 ## 环境变量
 
@@ -187,8 +208,11 @@ export DEEPSEEK_MODEL=deepseek-chat    # 可选
 | 变量 | 默认 | 作用 |
 |---|---|---|
 | `PORT` | `5174` | API 端口（生产模式下同时托管前端） |
-| `DEEPSEEK_API_KEY` | — | 不配则进入 Demo 模式 |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名 |
+| `AI_PROVIDER` | `deepseek` | `deepseek` / `openai` / `ollama` / `custom` |
+| `AI_BASE_URL` | provider 默认 | 覆盖端点，走网关时用 |
+| `AI_MODEL` | provider 默认 | 覆盖模型名 |
+| `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `AI_API_KEY` | — | 任一存在即可；都没有则进入 Demo 模式 |
+| `AI_APPROVAL` | `on` | 设为 `off` 时写操作不再请人确认（不建议） |
 | `DOMAIN_VERIFY_MODE` | `simulate` | `strict` 时用真实 DNS 查 TXT 记录 |
 | `GIT_MODE` | `simulate` | `live` 时调用真实 GitHub REST API |
 
@@ -198,7 +222,7 @@ export DEEPSEEK_MODEL=deepseek-chat    # 可选
 - **后端**：Node.js 22、Express 4、TypeScript、better-sqlite3（WAL）、multer
 - **运行时**：`worker_threads` 独立线程 + Node `vm` 沙箱 + 模块白名单 + 超时终止，ESM 转译
 - **实时**：SSE 事件总线（集合、文档、文件、函数、站点变更）
-- **AI**：DeepSeek Chat Completions（OpenAI 兼容）+ Tool Calling，最多 6 轮规划
+- **AI**：OpenAI 兼容 Chat Completions（DeepSeek / OpenAI / Ollama / 自建网关）+ Tool Calling + SSE 流式，最多 8 轮规划，写操作带人工审批
 
 ```
 studio-baas/
@@ -216,7 +240,9 @@ studio-baas/
 │   ├── cron.ts / schedules.ts # cron 解析、时区、调度器
 │   ├── git.ts                 # GitHub 绑定、pull/push、webhook 验签
 │   ├── runtime.ts             # 云函数沙箱
-│   ├── ai.ts                  # DeepSeek harness + 工具注册
+│   ├── ai.ts                  # 工具注册 + 本地规则引擎
+│   ├── agent/                 # provider 抽象、agent 循环、会话、权限映射
+│   ├── webhooks.ts            # 事件订阅与签名投递
 │   ├── seed.ts                # 演示数据
 │   └── events.ts              # SSE 事件总线
 └── web/src/
@@ -247,6 +273,14 @@ studio-baas/
 | GET/POST | `/v1/functions/:id/git` | 仓库绑定 / 读取 |
 | POST | `/v1/functions/:id/git/pull` `/push` | 拉取部署 / 提交回仓库 |
 | POST | `/v1/git/webhook/:id` | GitHub webhook（HMAC 验签） |
+| POST | `/v1/databases/collections/:id/documents/bulk` | 原子批量写入（≤500） |
+| POST | `/v1/ai/chat/stream` | AI 对话（SSE：`meta` / `delta` / `tool` / `approval` / `done`） |
+| POST | `/v1/ai/resume` | 批准后从断点继续 |
+| GET/POST | `/v1/ai/sessions` | 会话列表 / 新建 |
+| GET/PATCH/DELETE | `/v1/ai/sessions/:id` | 读取消息 / 重命名 / 删除 |
+| GET/POST | `/v1/webhooks` | 事件订阅列表 / 创建 |
+| POST | `/v1/webhooks/:id/test` `/rotate` | 测试投递 / 轮换密钥 |
+| GET | `/v1/webhooks/:id/deliveries` | 投递记录 |
 | GET | `/v1/sites/:id/preview/*` | 站点预览 |
 | POST | `/v1/sites/:id/deployments` | 部署 |
 | GET/POST | `/v1/users` | 用户列表 / 创建 |
