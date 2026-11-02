@@ -147,6 +147,24 @@ export function migrate() {
     event TEXT NOT NULL, status INTEGER, duration REAL, error TEXT,
     attempts INTEGER DEFAULT 1, createdAt TEXT NOT NULL
   );
+  -- 身份源（SSO）：oauth2 / oidc / cas / ldap，配置整体存 JSON，密文字段在应用层加解密
+  CREATE TABLE IF NOT EXISTS authProviders (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1, config TEXT NOT NULL, defaultRole TEXT,
+    createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+  );
+  -- 外部身份 → 本地用户。一个用户可以有多个身份（先密码登录，后绑定企业账号）
+  CREATE TABLE IF NOT EXISTS authIdentities (
+    id TEXT PRIMARY KEY, userId TEXT NOT NULL, providerId TEXT NOT NULL,
+    subject TEXT NOT NULL, email TEXT, data TEXT, lastLoginAt TEXT,
+    createdAt TEXT NOT NULL, UNIQUE(providerId, subject)
+  );
+  -- 一次性 state（CSRF）+ PKCE verifier + nonce，10 分钟过期，用后即删
+  CREATE TABLE IF NOT EXISTS authStates (
+    id TEXT PRIMARY KEY, providerId TEXT NOT NULL, projectId TEXT NOT NULL,
+    verifier TEXT, nonce TEXT, returnTo TEXT, appOrigin TEXT, callbackUrl TEXT,
+    createdAt TEXT NOT NULL, expiresAt TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_docs_col ON documents(collectionId);
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
@@ -161,6 +179,9 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_aiMessages_session ON aiMessages(sessionId, createdAt);
   CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(projectId);
   CREATE INDEX IF NOT EXISTS idx_webhookDeliveries_hook ON webhookDeliveries(webhookId, createdAt DESC);
+  CREATE INDEX IF NOT EXISTS idx_authProviders_project ON authProviders(projectId);
+  CREATE INDEX IF NOT EXISTS idx_authIdentities_user ON authIdentities(userId);
+  CREATE INDEX IF NOT EXISTS idx_authStates_expiry ON authStates(expiresAt);
   `);
 
   /* ------------------------------------------- project scoping columns */

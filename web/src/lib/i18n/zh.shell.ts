@@ -229,4 +229,100 @@ export const zhShell: Dict = {
   'These actions change data. Nothing has run yet.': '以下操作会修改数据，目前尚未执行。',
   Reject: '拒绝',
   'Approve & run': '批准并执行',
+
+  /* --------------------------------------------------------- login / sso */
+  'Sign in': '登录',
+  'Sign out': '退出登录',
+  'End this console session': '结束当前控制台会话',
+  'SSO, directory or password': 'SSO、目录账号或密码',
+  'Backend console': '后端控制台',
+  'Sign in to your workspace': '登录你的工作区',
+  'One console for databases, functions, sites and storage — with your company directory in front of the door.':
+    '数据库、函数、站点与存储的统一控制台——门口由你公司的目录把守。',
+  'OpenID Connect with PKCE, discovery and signed id_tokens':
+    'OpenID Connect：PKCE、自动发现、id_token 验签',
+  'OAuth 2.0 authorization code, CAS 2.0/3.0 service tickets':
+    'OAuth 2.0 授权码、CAS 2.0/3.0 服务票据',
+  'LDAP / Active Directory bind, no password ever stored':
+    'LDAP / AD 直接 bind，密码从不落库',
+  'Roles stay per project — signing in does not grant access by itself':
+    '角色按项目走——登录本身不会给你任何权限',
+  'Continue with': '继续使用',
+  'Signed in as {name}': '已登录为 {name}',
+  'Signed in and added to this project.': '已登录，并已加入此项目。',
+  'Back to console': '返回控制台',
+  'Directory account': '目录账号',
+  Directory: '目录',
+  Username: '用户名',
+  Password: '密码',
+  'or use a local account': '或使用本地账号',
+  'Local account': '本地账号',
+  'Sign in with password': '用密码登录',
+  'No identity provider is configured yet. An admin can add OIDC, OAuth2, CAS or LDAP in Settings → Authentication.':
+    '还没有配置身份源。管理员可在「设置 → 认证」里添加 OIDC、OAuth2、CAS 或 LDAP。',
+  'Continue to the demo console without signing in': '不登录，直接进入演示控制台',
+
+  Authentication: '认证',
+  'Identity providers that can sign people in to this console': '可以把人送进这个控制台的身份源',
+  'Copy login URL': '复制登录地址',
+  'Login URL copied': '登录地址已复制',
+  'Sign-in page': '登录页',
+  'Add provider': '添加身份源',
+  'Add identity provider': '添加身份源',
+  'Edit identity provider': '编辑身份源',
+  'No identity provider yet': '还没有配置身份源',
+  'Add OIDC, OAuth2, CAS or LDAP so people sign in with the account they already have. Password login keeps working alongside it.':
+    '添加 OIDC、OAuth2、CAS 或 LDAP，让大家用公司里已有的账号登录；密码登录仍然可用。',
+  'Identity provider added': '身份源已添加',
+  'Identity provider updated': '身份源已更新',
+  'Identity provider deleted': '身份源已删除',
+  'Delete "{name}"? Accounts linked through it keep existing, but lose this sign-in route.':
+    '删除「{name}」？通过它登录的账号会保留，但不能再走这个入口。',
+  'Give the provider a name': '请为身份源起个名字',
+  'Connection OK': '连接正常',
+  'Connection failed ({status})': '连接失败（{status}）',
+  'Test connection': '测试连接',
+  'Default role': '默认角色',
+  'Default role for new accounts': '新账号的默认角色',
+  'No project access': '不加入项目',
+  Accounts: '账号数',
+  'last updated {when}': '最后更新于{when}',
+  'Secrets are encrypted at rest and never sent back to the browser.':
+    '密钥加密存储，且从不回传到浏览器。',
+  'Display name': '显示名称',
+  'Issuer URL': '签发方地址（Issuer）',
+  'Endpoints are read from {issuer}/.well-known/openid-configuration':
+    '端点自动从 {issuer}/.well-known/openid-configuration 读取',
+  'Client ID': '客户端 ID',
+  'Client secret': '客户端密钥',
+  'Leave blank to keep {preview}': '留空表示保留 {preview}',
+  'openid is required; email and profile give us a name and address to match on.':
+    'openid 必需；email 与 profile 用来拿到姓名和邮箱做账号匹配。',
+  'Trust email from provider': '信任身份源返回的邮箱',
+  'Merge into an existing account with the same email — only when the provider says the email is verified.':
+    '同邮箱并入已有账号——仅在身份源声明该邮箱已验证时生效。',
+  'Authorize URL': '授权地址',
+  'Token URL': 'Token 地址',
+  'Userinfo URL': '用户信息地址',
+  'CAS server URL': 'CAS 服务地址',
+  'Login goes to {url}/login, tickets are checked against {url}/serviceValidate':
+    '登录跳到 {url}/login，票据在 {url}/serviceValidate 校验',
+  'Protocol version': '协议版本',
+  'Email attribute': '邮箱属性',
+  'Name attribute': '姓名属性',
+  'Missing attributes fall back to the username — CAS 2.0 usually has no attributes at all.':
+    '缺少属性时回退到用户名——CAS 2.0 通常根本不返回属性。',
+  'Server URL': '服务器地址',
+  'Base DN': '基准 DN',
+  'Bind DN (service account)': '绑定 DN（服务账号）',
+  'Bind password': '绑定密码',
+  'User filter': '用户过滤器',
+  '{{username}} is replaced with the typed name and escaped, so it cannot be used to inject a filter.':
+    '{{username}} 会被替换成输入的用户名并做转义，无法用来注入过滤器。',
+  'Username attribute': '用户名属性',
+  Transport: '传输',
+  'Skip certificate check (self-signed)': '跳过证书校验（自签名）',
+  'Allowed email domains': '允许的邮箱域',
+  'Comma separated. Empty means any domain the provider vouches for.':
+    '逗号分隔。留空表示接受身份源担保的任意域。',
 };

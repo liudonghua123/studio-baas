@@ -7,6 +7,7 @@ import { fmtDate, timeAgo } from '../lib/format';
 import { LANGS } from '../lib/i18n';
 import { useI18n } from '../lib/locale';
 import { useTheme } from '../lib/theme';
+import SsoCard from '../components/SsoCard';
 
 const SCOPES = ['databases.read', 'databases.write', 'storage.read', 'storage.write', 'functions.execute', 'users.read', 'users.write', 'sites.write'];
 
@@ -103,6 +104,8 @@ export default function Settings() {
               </div>
             </div>
           </div>
+
+          <SsoCard />
 
           <div className="card">
             <div className="card-head">

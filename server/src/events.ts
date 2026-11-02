@@ -5,7 +5,7 @@ export type StudioEvent = {
   type:
     | 'collection' | 'document' | 'file' | 'function' | 'execution' | 'site'
     | 'user' | 'message' | 'ai' | 'log'
-    | 'project' | 'member' | 'domain' | 'schedule' | 'git';
+    | 'project' | 'member' | 'domain' | 'schedule' | 'git' | 'auth';
   action: string;
   resource?: string;
   detail?: string;

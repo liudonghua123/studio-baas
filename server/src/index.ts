@@ -21,6 +21,7 @@ import * as members from './members.js';
 import * as domains from './domains.js';
 import * as schedules from './schedules.js';
 import * as git from './git.js';
+import { mountSsoRoutes } from './sso/routes.js';
 import { rateLimit, startRateLimitSweeper } from './ratelimit.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
@@ -120,7 +121,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ---------------------------------------------------------------- core */
-app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.10.0-studio', uptime: process.uptime() }));
+app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.11.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
@@ -135,6 +136,10 @@ app.get('/v1/permissions', (_req, res) => res.json({
   permissions: PERMISSIONS,
   matrix: Object.fromEntries(ROLES.map((r) => [r.id, permissionsForRole(r.id)])),
 }));
+
+/* ------------------------------------------------------------------ sso */
+// 身份源配置 + 登录端点：OAuth2 / OIDC / CAS / LDAP
+mountSsoRoutes(app, wrap, fail);
 
 /* -------------------------------------------------------------- members */
 app.get('/v1/members', guard('members.read'), (_req, res) => {
@@ -588,6 +593,13 @@ app.post('/v1/account/sessions',
   wrap((req, res) => {
   const { email, password } = req.body || {};
   res.status(201).json(store.login(email, password));
+}));
+
+// 退出登录必须真的作废服务端那一行，否则「退出」只是把票据从本地删掉
+app.delete('/v1/account/sessions', wrap((req, res) => {
+  const secret = req.header('x-studio-session') || '';
+  if (secret) db.prepare('DELETE FROM sessions WHERE secret=?').run(secret);
+  res.json({ ok: true });
 }));
 
 /* ------------------------------------------------------------- messaging */

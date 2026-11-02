@@ -173,3 +173,28 @@ export interface WebhookDelivery {
   id: string; webhookId: string; event: string; status: number | null;
   duration: number; error: string | null; attempts: number; createdAt: string;
 }
+
+/* ------------------------------------------------------------- SSO */
+
+export type SsoType = 'oauth2' | 'oidc' | 'cas' | 'ldap';
+
+export interface PublicProvider {
+  id: string; type: SsoType; name: string;
+}
+
+export interface IdentityProvider {
+  id: string; projectId: string; type: SsoType; name: string;
+  enabled: boolean; defaultRole: string | null;
+  allowedDomains: string[]; trustEmail: boolean;
+  /** secrets are stripped server-side; only these hints come back */
+  config: Record<string, any>;
+  secrets: Record<string, { set: boolean; preview: string }>;
+  identities: number;
+  createdAt: string; updatedAt: string;
+}
+
+export interface SsoSession {
+  userId: string; sessionId: string; secret: string; expiresAt: string;
+  name: string; email: string; provider: string;
+  role: string | null; joined: boolean; isNewUser: boolean;
+}

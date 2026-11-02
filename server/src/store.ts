@@ -972,6 +972,22 @@ export function deleteUser(id: string) {
   return true;
 }
 
+/**
+ * 发一个控制台会话。密码登录和 SSO 登录共用同一条落库路径，
+ * 免得两种入口的过期时间/字段悄悄分叉。
+ */
+export function issueSession(userId: string) {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(userId) as any;
+  if (!u) throw new Error('User not found');
+  if (u.status && u.status !== 'active') throw new Error(`Account is ${u.status}`);
+  const id = uid('sess_');
+  const secret = crypto.randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
+  db.prepare('INSERT INTO sessions (id,userId,secret,expiresAt,createdAt) VALUES (?,?,?,?,?)').run(id, u.id, secret, expiresAt, now());
+  db.prepare('UPDATE users SET lastLoginAt=? WHERE id=?').run(now(), u.id);
+  return { userId: u.id, sessionId: id, secret, expiresAt, name: u.name, email: u.email };
+}
+
 export function login(email: string, password: string) {
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').toLowerCase()) as any;
   if (!u) throw new Error('Invalid credentials');
@@ -980,12 +996,7 @@ export function login(email: string, password: string) {
     // 登录成功时顺手把旧哈希升级为「每用户盐」格式
     db.prepare('UPDATE users SET passwordHash=? WHERE id=?').run(hashPassword(password), u.id);
   }
-  const id = uid('sess_');
-  const secret = crypto.randomBytes(24).toString('hex');
-  const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
-  db.prepare('INSERT INTO sessions (id,userId,secret,expiresAt,createdAt) VALUES (?,?,?,?,?)').run(id, u.id, secret, expiresAt, now());
-  db.prepare('UPDATE users SET lastLoginAt=? WHERE id=?').run(now(), u.id);
-  return { userId: u.id, sessionId: id, secret, expiresAt, name: u.name, email: u.email };
+  return issueSession(u.id);
 }
 
 /* --------------------------------------------------------------- messaging */

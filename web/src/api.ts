@@ -3,6 +3,7 @@ import type {
   FileItem, FunctionDef, FunctionDomain, FunctionVersion, CollectionIndex, QueryPlan, GitCommit, GitDeploy, GitIntegration,
   LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
   AiSession, AiMessage, AgentEvent, Webhook, WebhookDelivery,
+  PublicProvider, IdentityProvider, SsoSession,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -222,6 +223,25 @@ export const api = {
 
   bulkCreateDocuments: (collectionId: string, documents: Record<string, unknown>[]) =>
     post<{ total: number; documents: Doc[] }>(`/v1/databases/collections/${collectionId}/documents/bulk`, { documents }),
+
+  /* ------------------------------------------------------------ SSO */
+  // 登录页用：只拿到「有哪些按钮」，没有任何配置细节
+  ssoProviders: (projectId?: string) =>
+    get<{ providers: PublicProvider[]; projectId: string }>(
+      `/v1/auth/sso/providers${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
+  ssoConfig: () => get<{ providers: IdentityProvider[] }>('/v1/auth/sso/config'),
+  createSsoProvider: (body: Record<string, unknown>) => post<IdentityProvider>('/v1/auth/sso/config', body),
+  updateSsoProvider: (id: string, body: Record<string, unknown>) =>
+    patch<IdentityProvider>(`/v1/auth/sso/config/${id}`, body),
+  deleteSsoProvider: (id: string) => del<{ ok: boolean }>(`/v1/auth/sso/config/${id}`),
+  testSsoProvider: (id: string) => post<Record<string, any>>(`/v1/auth/sso/config/${id}/test`),
+  startSso: (id: string, returnTo: string) =>
+    post<{ url: string; state: string }>(`/v1/auth/sso/${id}/start`, { returnTo }),
+  ldapLogin: (id: string, username: string, password: string) =>
+    post<SsoSession>(`/v1/auth/sso/${id}/login`, { username, password }),
+  logout: () => del<{ ok: boolean }>('/v1/account/sessions'),
+  passwordLogin: (email: string, password: string) =>
+    post<{ secret: string; userId: string; name: string; email: string }>('/v1/account/sessions', { email, password }),
 
   docs: () => get<{ title: string; markdown: string }>('/v1/docs'),
 

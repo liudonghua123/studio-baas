@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Database, FolderOpen, Boxes, Globe2, Users, Send, Sparkles,
   ScrollText, Settings2, BookOpen, Search, Bell, ChevronDown, HelpCircle, Activity,
-  Layers, Check, Plus, ShieldCheck, UserRound, Sun, Moon, Webhook,
+  Layers, Check, Plus, ShieldCheck, UserRound, Sun, Moon, Webhook, LogIn, LogOut,
 } from 'lucide-react';
 import { api, currentProjectId, setProject } from '../api';
 import { useAuth } from '../lib/auth';
@@ -55,7 +55,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [acct, setAcct] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const acctRef = useRef<HTMLDivElement>(null);
-  const { me, role, actAs, setActAs } = useAuth();
+  const { me, role, actAs, setActAs, session, signOut } = useAuth();
   const { t, lang, toggleLang } = useI18n();
   const { resolved, toggle } = useTheme();
   const initials = (me?.principal?.name || 'Studio BaaS')
@@ -254,6 +254,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     </button>
                   ))}
                   <div className="proj-menu-sep" />
+                  {session ? (
+                    <button className="proj-item" onClick={() => { setAcct(false); signOut(); }}>
+                      <LogOut size={13} />
+                      <span className="proj-item-text"><b>{t('Sign out')}</b><small>{t('End this console session')}</small></span>
+                    </button>
+                  ) : (
+                    <button className="proj-item" onClick={() => { setAcct(false); nav2('/login'); }}>
+                      <LogIn size={13} />
+                      <span className="proj-item-text"><b>{t('Sign in')}</b><small>{t('SSO, directory or password')}</small></span>
+                    </button>
+                  )}
                   <button className="proj-item" onClick={() => { setAcct(false); nav2('/members'); }}>
                     <UserRound size={13} />
                     <span className="proj-item-text"><b>{t('Manage members')}</b><small>{t('Invite people and change roles')}</small></span>

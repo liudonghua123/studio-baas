@@ -52,6 +52,10 @@ export const PERMISSIONS: PermissionDef[] = [
   { id: 'users.read', group: 'Auth', label: 'Read end users', roles: DEV },
   { id: 'users.write', group: 'Auth', label: 'Create / block users', roles: ADM },
 
+  // 身份源配置能决定「谁能进控制台」，只读也不该给到 developer
+  { id: 'sso.read', group: 'Auth', label: 'View identity providers', roles: ADM },
+  { id: 'sso.write', group: 'Auth', label: 'Configure SSO / LDAP', roles: ADM },
+
   { id: 'messaging.read', group: 'Messaging', label: 'Read messages', roles: DEV },
   { id: 'messaging.write', group: 'Messaging', label: 'Send messages', roles: DEV },
 
