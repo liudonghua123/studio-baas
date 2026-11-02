@@ -418,6 +418,16 @@ if pid and uid_:
         s, r, _ = call('GET', '/v1/auth/me', act_as='viewer')
         check('rbac', 'credential-less demo mode still honours act-as', r.get('role') == 'viewer', f'{r.get("role")}')
 
+        # 退出登录必须让服务端那一行失效，而不是只把票据从浏览器删掉
+        s, r, _ = call('DELETE', '/v1/account/sessions', headers={'x-studio-session': sess})
+        check('auth', 'sign-out revokes the session server-side', s == 200, f'{s} {r}')
+        # /me 仍然 200，但身份被标成 invalid（前端据此提示“会话过期”）；真正的拦截在 guard 上
+        s, r, _ = call('GET', '/v1/auth/me', headers={'x-studio-session': sess})
+        check('auth', 'revoked session resolves to an invalid principal',
+              s == 200 and (r.get('principal') or {}).get('invalid') is True, f'{s} {r}')
+        s, r, _ = call('GET', '/v1/databases/collections', headers={'x-studio-session': sess})
+        check('auth', 'revoked session cannot reach guarded routes', s == 401, f'{s} {r}')
+
 # --------------------------------------------------------- 16 function versions
 if fnid:
     s, vl0, _ = call('GET', f'/v1/functions/{fnid}/versions')
@@ -633,6 +643,72 @@ s, vr, _ = call('POST', '/v1/ai/chat', {'messages': [{'role': 'user', 'content':
 check('ai', 'viewer cannot delete through the agent',
       s == 200 and ('缺少权限' in str(vr.get('text', '')) or 'Missing permission' in str(vr.get('text', ''))),
       str(vr.get('text', ''))[:140])
+
+
+# ------------------------------------------------------------ 14 sso / idp
+# 登录流程本身由 scripts/sso-e2e.mjs 对着真实 IdP 跑；这里只钉住接口契约与权限边界。
+s, r, _ = call('POST', '/v1/auth/sso/config', {'type': 'oidc', 'name': 'smoke'})
+check('sso', 'missing fields name the field', s == 400 and 'clientId' in str(r.get('error', '')), f'{s} {r}')
+
+s, idp, _ = call('POST', '/v1/auth/sso/config', {
+    'type': 'oidc', 'name': 'smoke-oidc', 'defaultRole': 'viewer',
+    # discovery 关掉 + 写死端点：这样 /start 不需要真的联网，断言保持确定性
+    'config': {
+        'issuer': 'https://idp.example.test', 'clientId': 'studio', 'clientSecret': 'smoke-secret-4571',
+        'discovery': False,
+        'authorizeUrl': 'https://idp.example.test/authorize',
+        'tokenUrl': 'https://idp.example.test/token',
+        'jwksUri': 'https://idp.example.test/jwks',
+    },
+})
+idp_id = idp.get('id') if s == 201 else None
+check('sso', 'create an OIDC provider', s == 201 and idp_id, f'{s} {idp}')
+check('sso', 'client secret is masked, never echoed',
+      'smoke-secret-4571' not in json.dumps(idp) and idp.get('secrets', {}).get('clientSecret', {}).get('set') is True,
+      json.dumps(idp.get('secrets')))
+
+if idp_id:
+    s, lst, _ = call('GET', '/v1/auth/sso/config')
+    row = next((p for p in lst.get('providers', []) if p['id'] == idp_id), {})
+    check('sso', 'config list omits the secret', s == 200 and 'smoke-secret-4571' not in json.dumps(lst), f'{s}')
+
+    s, pub, _ = call('GET', '/v1/auth/sso/providers')
+    entry = next((p for p in pub.get('providers', []) if p['id'] == idp_id), {})
+    check('sso', 'login page sees name and type only',
+          entry.get('name') == 'smoke-oidc' and set(entry.keys()) == {'id', 'type', 'name'}, f'{entry}')
+
+    s, r, _ = call('GET', '/v1/auth/sso/config', act_as='developer')
+    check('sso', 'developer cannot read identity providers', s == 403, f'{s} {r}')
+
+    s, r, _ = call('PATCH', f'/v1/auth/sso/config/{idp_id}', {'enabled': False})
+    check('sso', 'disable a provider', s == 200 and r.get('enabled') is False, f'{s}')
+
+    s, pub2, _ = call('GET', '/v1/auth/sso/providers')
+    check('sso', 'disabled provider leaves the login page',
+          not any(p['id'] == idp_id for p in pub2.get('providers', [])), f'{pub2}')
+
+    s, r, _ = call('POST', f'/v1/auth/sso/{idp_id}/start', {})
+    check('sso', 'disabled provider cannot start a login', s == 404, f'{s} {r}')
+
+    s, r, _ = call('PATCH', f'/v1/auth/sso/config/{idp_id}', {'enabled': True, 'name': 'smoke-renamed'})
+    check('sso', 'rename and re-enable', s == 200 and r.get('name') == 'smoke-renamed', f'{s}')
+
+    s, r, _ = call('POST', f'/v1/auth/sso/{idp_id}/start', {})
+    check('sso', 'start returns a state and an authorize URL',
+          s == 200 and len(str(r.get('state', ''))) > 20 and str(r.get('url', '')).startswith('https://idp.example.test'),
+          f'{s} {str(r.get("url"))[:80]}')
+
+    s, r, _ = call('POST', '/v1/auth/sso/config', {
+        'type': 'ldap', 'name': 'smoke-ldap',
+        'config': {'url': 'ldap://127.0.0.1:1', 'baseDn': 'dc=x', 'userFilter': 'uid={{username}}'},
+    })
+    check('sso', 'userFilter must be a full filter', s == 400 and 'userFilter' in str(r.get('error', '')), f'{s} {r}')
+
+    s, r, _ = call('POST', '/v1/auth/sso/config', {'type': 'saml', 'name': 'nope'})
+    check('sso', 'unknown provider type is refused', s == 400, f'{s} {r}')
+
+    s, r, _ = call('DELETE', f'/v1/auth/sso/config/{idp_id}')
+    check('sso', 'delete a provider', s == 200 and r.get('ok') is True, f'{s}')
 
 _srv.shutdown()
 
