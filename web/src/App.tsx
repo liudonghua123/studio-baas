@@ -19,6 +19,7 @@ import Docs from './pages/Docs';
 import AI from './pages/AI';
 import Projects from './pages/Projects';
 import Members from './pages/Members';
+import Webhooks from './pages/Webhooks';
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/auth" element={<Auth />} />
             <Route path="/messaging" element={<Messaging />} />
             <Route path="/logs" element={<Logs />} />
+            <Route path="/webhooks" element={<Webhooks />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/members" element={<Members />} />
             <Route path="/settings" element={<Settings />} />

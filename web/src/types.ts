@@ -130,12 +130,46 @@ export interface ToolTrace {
   ok: boolean; duration: number; summary: string;
 }
 export interface AiStatus {
-  provider: string; model: string; configured: boolean; baseUrl: string;
-  mode: 'deepseek' | 'demo';
-  tools: { name: string; description: string; parameters: any }[];
+  provider: string;
+  providerId: 'deepseek' | 'openai' | 'ollama' | 'custom';
+  model: string; configured: boolean; baseUrl: string; keyless?: boolean;
+  mode: 'live' | 'demo';
+  tools: { name: string; description: string; parameters: any; dangerous?: boolean }[];
 }
 export interface ChatReply {
   text: string; traces: ToolTrace[]; model: string;
   mode: 'deepseek' | 'demo';
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+}
+export interface AiSession {
+  id: string; title: string; model: string | null; provider: string | null;
+  messages: number; createdAt: string; updatedAt: string;
+}
+export interface AiMessage {
+  id: string; sessionId: string; role: 'user' | 'assistant'; content: string;
+  traces: ToolTrace[]; createdAt: string;
+}
+export interface PendingCall {
+  id: string; name: string; args: Record<string, any>; summary: string; description: string;
+}
+export type AgentEvent =
+  | { type: 'meta'; mode: 'model' | 'demo'; provider: string; model: string; sessionId?: string }
+  | { type: 'delta'; text: string }
+  | { type: 'reasoning'; text: string }
+  | { type: 'tool'; phase: 'start' | 'end'; trace: ToolTrace }
+  | { type: 'approval'; token: string; calls: PendingCall[] }
+  | { type: 'done'; text: string; traces: ToolTrace[]; usage?: Record<string, number>; sessionId?: string; steps: number }
+  | { type: 'error'; message: string };
+
+export interface Webhook {
+  id: string; url: string; events: string[]; description: string | null;
+  enabled: boolean; deliveries: number; failures: number;
+  lastStatus: number | null; lastError: string | null; lastDeliveryAt: string | null;
+  createdAt: string; updatedAt: string;
+  /** only present on the create / rotate response */
+  secret?: string;
+}
+export interface WebhookDelivery {
+  id: string; webhookId: string; event: string; status: number | null;
+  duration: number; error: string | null; attempts: number; createdAt: string;
 }

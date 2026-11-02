@@ -199,4 +199,34 @@ export const zhShell: Dict = {
   Completed: '完成',
   Running: '运行中',
   'Timed out': '超时',
+
+  /* ------------------------------------------------------------ ai agent */
+  '{model} · online': '{model} · 在线',
+  '{model} · demo mode': '{model} · 演示模式',
+  Conversations: '会话',
+  'New conversation': '新建会话',
+  'New chat': '新会话',
+  'No conversations yet.': '还没有会话。',
+  'Hide conversations': '收起会话列表',
+  'Show conversations': '展开会话列表',
+  'Delete this conversation?': '删除这个会话？',
+  New: '新建',
+  'No API key configured — running a local rule engine that still performs real tool calls. Add a key in':
+    '尚未配置密钥 —— 正在使用本地规则引擎，但仍会真实执行工具调用。在',
+  'Ask the agent to query data, run functions, edit sites… (⌘↵ to send)':
+    '让助手查询数据、执行函数、修改站点…（⌘↵ 发送）',
+  'model tool-calling': '模型工具调用',
+  Stop: '停止',
+  'OpenAI-compatible tool calling, up to 8 planning steps per turn.':
+    '兼容 OpenAI 的工具调用，每轮最多 8 步规划。',
+  'The model picks the tools; read-only calls run immediately.':
+    '模型挑选工具；只读调用立即执行。',
+  'Anything that writes waits for your approval.':
+    '任何写操作都会先等待你批准。',
+  '{n} tool call': '{n} 次工具调用',
+  '{n} tool calls': '{n} 次工具调用',
+  'Approval required': '需要确认',
+  'These actions change data. Nothing has run yet.': '以下操作会修改数据，目前尚未执行。',
+  Reject: '拒绝',
+  'Approve & run': '批准并执行',
 };

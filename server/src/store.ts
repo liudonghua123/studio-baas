@@ -422,6 +422,47 @@ export function createDocument(
   return getDocumentRaw(col.id, id)!;
 }
 
+/**
+ * Batch insert — all-or-nothing, so a bad row cannot leave a half-written import
+ * behind. Appwrite exposes the same shape as `createDocuments`.
+ */
+export function createDocuments(
+  collectionId: string,
+  inputs: { data: Record<string, unknown>; permissions?: string[] }[],
+  docIds?: string[],
+): Doc[] {
+  const col = getCollection(collectionId);
+  if (!col) throw new Error(`Collection "${collectionId}" not found`);
+  if (!Array.isArray(inputs) || !inputs.length) throw new Error('documents[] is required');
+  if (inputs.length > 500) throw new Error('At most 500 documents per batch');
+
+  // Validate everything before touching the database: the first error wins and
+  // its message carries the offending index.
+  const prepared = inputs.map((input, i) => {
+    try {
+      const clean = validateDocument(col.id, input?.data || {});
+      const rules = input?.permissions?.length ? assertPermissionRules(input.permissions) : DEFAULT_DOCUMENT_PERMISSIONS;
+      return { id: docIds?.[i] || uid('doc_'), clean, rules };
+    } catch (e: any) {
+      throw new Error(`documents[${i}]: ${e?.message || e}`);
+    }
+  });
+
+  const at = now();
+  const insert = db.prepare(
+    'INSERT INTO documents (id,collectionId,data,permissions,createdAt,updatedAt) VALUES (?,?,?,?,?,?)',
+  );
+  try {
+    db.transaction(() => {
+      for (const p of prepared) insert.run(p.id, col.id, JSON.stringify(p.clean), JSON.stringify(p.rules), at, at);
+    })();
+  } catch (e: any) {
+    throw translateConstraintError(e) ?? e;
+  }
+  bus.publish({ type: 'document', action: 'bulk-create', resource: col.key, detail: `${prepared.length} documents` });
+  return prepared.map((p) => getDocumentRaw(col.id, p.id)!);
+}
+
 export function updateDocument(
   collectionId: string,
   docId: string,

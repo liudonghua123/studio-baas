@@ -127,6 +127,26 @@ export function migrate() {
     version INTEGER NOT NULL, code TEXT NOT NULL, label TEXT, createdBy TEXT,
     createdAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS aiSessions (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, title TEXT NOT NULL,
+    model TEXT, provider TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS aiMessages (
+    id TEXT PRIMARY KEY, sessionId TEXT NOT NULL, role TEXT NOT NULL,
+    content TEXT NOT NULL, traces TEXT, createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS webhooks (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL, url TEXT NOT NULL, events TEXT NOT NULL,
+    secret TEXT, enabled INTEGER DEFAULT 1, description TEXT,
+    deliveries INTEGER DEFAULT 0, failures INTEGER DEFAULT 0,
+    lastStatus INTEGER, lastError TEXT, lastDeliveryAt TEXT,
+    createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS webhookDeliveries (
+    id TEXT PRIMARY KEY, webhookId TEXT NOT NULL, projectId TEXT NOT NULL,
+    event TEXT NOT NULL, status INTEGER, duration REAL, error TEXT,
+    attempts INTEGER DEFAULT 1, createdAt TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_docs_col ON documents(collectionId);
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
@@ -137,6 +157,10 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_members_project ON members(projectId);
   CREATE INDEX IF NOT EXISTS idx_members_user ON members(userId);
   CREATE INDEX IF NOT EXISTS idx_fnver_fn ON functionVersions(functionId, version DESC);
+  CREATE INDEX IF NOT EXISTS idx_aiSessions_project ON aiSessions(projectId, updatedAt DESC);
+  CREATE INDEX IF NOT EXISTS idx_aiMessages_session ON aiMessages(sessionId, createdAt);
+  CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(projectId);
+  CREATE INDEX IF NOT EXISTS idx_webhookDeliveries_hook ON webhookDeliveries(webhookId, createdAt DESC);
   `);
 
   /* ------------------------------------------- project scoping columns */

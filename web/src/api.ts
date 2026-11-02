@@ -2,6 +2,7 @@ import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
   FileItem, FunctionDef, FunctionDomain, FunctionVersion, CollectionIndex, QueryPlan, GitCommit, GitDeploy, GitIntegration,
   LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
+  AiSession, AiMessage, AgentEvent, Webhook, WebhookDelivery,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -39,6 +40,53 @@ const get = <T>(p: string) => request<T>(p);
 const post = <T>(p: string, body?: any) => request<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
 const patch = <T>(p: string, body?: any) => request<T>(p, { method: 'PATCH', body: JSON.stringify(body || {}) });
 const del = <T>(p: string) => request<T>(p, { method: 'DELETE' });
+
+/**
+ * Consume an SSE endpoint (`/v1/ai/chat/stream`, `/v1/ai/resume`).
+ *
+ * `EventSource` cannot POST, so the stream is read by hand. Frames are separated
+ * by a blank line; anything that is not a `data:` line is a comment/heartbeat.
+ */
+export async function streamAgent(
+  path: string,
+  body: unknown,
+  onEvent: (ev: AgentEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { ...baseHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '');
+    let message = `Request failed (${res.status})`;
+    try { message = JSON.parse(text)?.error || message; } catch { /* keep default */ }
+    throw new Error(message);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const line = frame.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) continue;
+        try { onEvent(JSON.parse(line.slice(5).trim()) as AgentEvent); } catch { /* skip malformed frame */ }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 export const api = {
   metrics: () => get<Metrics>('/v1/metrics'),
@@ -149,8 +197,31 @@ export const api = {
 
   aiStatus: () => get<AiStatus>('/v1/ai/status'),
   aiChat: (messages: { role: string; content: string }[]) => post<ChatReply>('/v1/ai/chat', { messages }),
-  aiSettings: () => get<{ configured: boolean; model: string; source: string; keyPreview: string }>('/v1/settings/ai'),
-  saveAiSettings: (body: { apiKey?: string; model?: string }) => post<any>('/v1/settings/ai', body),
+  aiSettings: () => get<{
+    configured: boolean; provider: string; providerLabel: string; model: string;
+    baseUrl: string; keyless: boolean; source: string; keyPreview: string;
+  }>('/v1/settings/ai'),
+  saveAiSettings: (body: { apiKey?: string; model?: string; provider?: string; baseUrl?: string }) =>
+    post<any>('/v1/settings/ai', body),
+
+  aiSessions: () => get<{ total: number; sessions: AiSession[] }>('/v1/ai/sessions'),
+  aiSession: (id: string) => get<{ session: AiSession; messages: AiMessage[] }>(`/v1/ai/sessions/${id}`),
+  createAiSession: (body: { title?: string } = {}) => post<AiSession>('/v1/ai/sessions', body),
+  renameAiSession: (id: string, title: string) => patch<AiSession>(`/v1/ai/sessions/${id}`, { title }),
+  deleteAiSession: (id: string) => del<{ ok: boolean }>(`/v1/ai/sessions/${id}`),
+
+  webhooks: () => get<{ total: number; webhooks: Webhook[] }>('/v1/webhooks'),
+  createWebhook: (body: { url: string; events?: string[]; description?: string }) => post<Webhook>('/v1/webhooks', body),
+  updateWebhook: (id: string, body: Partial<{ url: string; events: string[]; description: string; enabled: boolean }>) =>
+    patch<Webhook>(`/v1/webhooks/${id}`, body),
+  deleteWebhook: (id: string) => del<{ ok: boolean }>(`/v1/webhooks/${id}`),
+  rotateWebhook: (id: string) => post<Webhook>(`/v1/webhooks/${id}/rotate`),
+  testWebhook: (id: string) => post<{ ok: boolean; delivery: WebhookDelivery }>(`/v1/webhooks/${id}/test`),
+  webhookDeliveries: (id?: string, limit = 50) =>
+    get<{ deliveries: WebhookDelivery[] }>(`/v1/webhooks/deliveries?limit=${limit}${id ? `&webhookId=${id}` : ''}`),
+
+  bulkCreateDocuments: (collectionId: string, documents: Record<string, unknown>[]) =>
+    post<{ total: number; documents: Doc[] }>(`/v1/databases/collections/${collectionId}/documents/bulk`, { documents }),
 
   docs: () => get<{ title: string; markdown: string }>('/v1/docs'),
 

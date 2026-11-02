@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Database, FolderOpen, Boxes, Globe2, Users, Send, Sparkles,
   ScrollText, Settings2, BookOpen, Search, Bell, ChevronDown, HelpCircle, Activity,
-  Layers, Check, Plus, ShieldCheck, UserRound, Sun, Moon,
+  Layers, Check, Plus, ShieldCheck, UserRound, Sun, Moon, Webhook,
 } from 'lucide-react';
 import { api, currentProjectId, setProject } from '../api';
 import { useAuth } from '../lib/auth';
@@ -26,6 +26,7 @@ const navGroups = [
       { to: '/sites', label: 'Sites', icon: Globe2 },
       { to: '/auth', label: 'Auth', icon: Users },
       { to: '/messaging', label: 'Messaging', icon: Send },
+      { to: '/webhooks', label: 'Webhooks', icon: Webhook },
     ],
   },
   {
@@ -40,7 +41,7 @@ const navGroups = [
 const titles: Record<string, string> = {
   '': 'Dashboard', databases: 'Databases', storage: 'Storage', functions: 'Functions',
   sites: 'Sites', auth: 'Auth', messaging: 'Messaging', ai: 'AI Assistant',
-  logs: 'Logs', settings: 'Settings', docs: 'Analysis', projects: 'Projects', members: 'Members',
+  logs: 'Logs', settings: 'Settings', docs: 'Analysis', projects: 'Projects', members: 'Members', webhooks: 'Webhooks',
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -49,7 +50,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [project, setProjectState] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [menu, setMenu] = useState(false);
-  const [aiMode, setAiMode] = useState<'demo' | 'deepseek'>('demo');
+  const [aiMode, setAiMode] = useState<'demo' | 'live'>('demo');
+  const [aiLabel, setAiLabel] = useState('DeepSeek');
   const [acct, setAcct] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const acctRef = useRef<HTMLDivElement>(null);
@@ -67,7 +69,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       if (!currentProjectId() && r.currentProjectId) setProject(r.currentProjectId);
     }).catch(() => {});
     api.project().then((p) => setProjectState(p as any)).catch(() => {});
-    api.aiStatus().then((s) => setAiMode(s.mode)).catch(() => {});
+    api.aiStatus().then((s) => { setAiMode(s.mode); setAiLabel(s.provider); }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -174,7 +176,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Sparkles size={16} />
             <span>
               {t('AI Assistant')}
-              <small>{aiMode === 'deepseek' ? t('DeepSeek · online') : t('DeepSeek · demo mode')}</small>
+              <small>{aiMode === 'live' ? t('{model} · online', { model: aiLabel }) : t('{model} · demo mode', { model: aiLabel })}</small>
             </span>
           </NavLink>
           <div className="flex tiny dim" style={{ padding: '12px 10px 2px', gap: 7 }}>

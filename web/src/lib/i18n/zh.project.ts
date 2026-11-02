@@ -207,4 +207,60 @@ export const zhProject: Dict = {
     '把绑定的仓库文件拉取进函数（部署），并报告对应的提交。',
   'List projects and the current role of the caller in each of them.':
     '列出项目，以及调用者在每个项目中的当前角色。',
+
+  /* ------------------------------------------------------------ webhooks */
+  Integrations: '集成',
+  Webhooks: 'Webhook',
+  'Push project events to any HTTP endpoint. Every delivery is signed with HMAC-SHA256.':
+    '把项目事件推送到任意 HTTP 端点，每次投递都用 HMAC-SHA256 签名。',
+  'New webhook': '新建 Webhook',
+  'A URL is required': '请填写 URL',
+  'Webhook created': 'Webhook 已创建',
+  'Webhook deleted': 'Webhook 已删除',
+  'Delete this webhook? Delivery history goes with it.': '删除这个 Webhook？投递记录会一并清除。',
+  'Rotate the signing secret? The old one stops working immediately.':
+    '轮换签名密钥？旧密钥会立即失效。',
+  'Rotate secret': '轮换密钥',
+  'Send test event': '发送测试事件',
+  'Test delivered ({status} in {ms}ms)': '测试已送达（{status}，{ms}ms）',
+  'Test failed: {error}': '测试失败：{error}',
+  'no response': '没有响应',
+  '{n} subscriptions': '{n} 个订阅',
+  '{n} deliveries': '{n} 次投递',
+  'Retries: 3 attempts on 5xx / timeout': '重试：5xx 或超时最多 3 次',
+  'No webhooks yet': '还没有 Webhook',
+  'Subscribe to document.created and get a POST the moment a row is written.':
+    '订阅 document.created，写入一行的瞬间就会收到 POST。',
+  Endpoint: '端点',
+  Events: '事件',
+  Deliveries: '投递',
+  'Last delivery': '最近投递',
+  'Not called': '未调用',
+  Disable: '停用',
+  Enable: '启用',
+  'No deliveries yet. Hit “Send test event” to try it.': '还没有投递记录，点「发送测试事件」试试。',
+  Event: '事件',
+  Attempts: '尝试',
+  'The endpoint receives a JSON POST for every matching event.':
+    '每个匹配的事件都会向该端点发送一次 JSON POST。',
+  'Create webhook': '创建 Webhook',
+  'Endpoint URL': '端点 URL',
+  'Pick individual events, or leave everything unselected to subscribe to all.':
+    '可以逐个勾选事件；全部不选表示订阅所有事件。',
+  'All events': '所有事件',
+  'Signing secret': '签名密钥',
+  'Shown once. Copy it now — the list only keeps a digest.':
+    '只显示这一次，请立即复制 —— 列表只保留摘要。',
+  'Verify every request with': '用下面的请求头校验每次投递：',
+  'computed over': '计算方式为',
+  /* ------------------------------------------------------- ai provider */
+  'AI operator · {provider}': 'AI 操作员 · {provider}',
+  Provider: '服务商',
+  'Any OpenAI-compatible endpoint works.': '任何兼容 OpenAI 协议的端点都可以。',
+  'Tool calling must be supported.': '需要支持工具调用（tool calling）。',
+  'not required for a local server': '本地服务无需填写',
+  'Loaded from an environment variable (takes precedence).': '来自环境变量（优先级更高）。',
+  'Base URL': 'Base URL',
+  'Leave the default unless you route through a gateway.': '除非经过网关，否则保持默认值。',
+  '{n} subscription': '{n} 个订阅',
 };

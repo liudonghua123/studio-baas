@@ -9,9 +9,14 @@ import { seed, seedDemoProject, seedMembers, seedSchedules, seedGit, seedDomains
 import { bus } from './events.js';
 import * as store from './store.js';
 import * as projects from './projects.js';
-import { chat, getAiConfig, tools } from './ai.js';
+import { tools } from './ai.js';
+import { getAiConfig } from './agent/provider.js';
+import { chatOnce, resumeAgent, runAgent, type AgentEvent } from './agent/agent.js';
+import { permissionFor } from './agent/permissions.js';
+import * as aiSessions from './agent/sessions.js';
+import * as webhooks from './webhooks.js';
 import { runWithContext, withProject, currentProjectId, DEFAULT_PROJECT_ID } from './context.js';
-import { resolveAuth, guard, me } from './auth.js';
+import { resolveAuth, guard, me, can } from './auth.js';
 import * as members from './members.js';
 import * as domains from './domains.js';
 import * as schedules from './schedules.js';
@@ -115,7 +120,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ---------------------------------------------------------------- core */
-app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.9.0-studio', uptime: process.uptime() }));
+app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.10.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
@@ -267,6 +272,21 @@ app.get('/v1/databases/collections/:id/documents', guard('databases.read'), wrap
 app.post('/v1/databases/collections/:id/documents', guard('databases.write'), wrap((req, res) => {
   const d = store.createDocument(req.params.id, docPayload(req.body), req.body?.documentId, req.body?.permissions);
   res.status(201).json(d);
+}));
+
+/**
+ * Batch insert (Appwrite's createDocuments). Atomic: one invalid row rejects the
+ * whole batch, so a failed import never leaves half the data behind.
+ */
+app.post('/v1/databases/collections/:id/documents/bulk', guard('databases.write'), wrap((req, res) => {
+  const inputs = Array.isArray(req.body?.documents) ? req.body.documents : [];
+  if (!inputs.length) return fail(res, new Error('documents[] is required'));
+  const rows = store.createDocuments(
+    req.params.id,
+    inputs.map((item: any) => ({ data: docPayload(item), permissions: item?.permissions })),
+    Array.isArray(req.body?.ids) ? req.body.ids : undefined,
+  );
+  res.status(201).json({ total: rows.length, documents: rows });
 }));
 
 app.get('/v1/databases/collections/:id/documents/:docId', guard('databases.read'), wrap((req, res) => {
@@ -610,27 +630,186 @@ app.get('/v1/realtime', (req, res) => {
 });
 
 /* -------------------------------------------------------------------- ai */
+
 app.get('/v1/ai/status', (_req, res) => {
   const cfg = getAiConfig();
   res.json({
-    provider: 'DeepSeek', model: cfg.model, configured: cfg.configured,
-    baseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-    tools: tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
-    mode: cfg.configured ? 'deepseek' : 'demo',
+    provider: cfg.label,
+    providerId: cfg.provider,
+    model: cfg.model,
+    configured: cfg.configured,
+    baseUrl: cfg.baseUrl,
+    keyless: cfg.keyless,
+    // Only advertise what this caller can actually run: a viewer should not see
+    // `delete_collection` in the tool list and wonder why it fails.
+    tools: tools
+      .filter((t) => { const p = permissionFor(t.name); return !p || can(p); })
+      .map((t) => ({
+        name: t.name, description: t.description, parameters: t.parameters,
+        dangerous: !/^(list_|get_|explain_|search_|preview_)/.test(t.name),
+      })),
+    mode: cfg.configured ? 'live' : 'demo',
   });
 });
 
-app.post('/v1/ai/chat', wrap(async (req, res) => {
+/** Non-streaming turn. Callers here are trusted API clients, so approvals are implicit. */
+app.post('/v1/ai/chat', guard('project.read'), wrap(async (req, res) => {
   const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
   if (!messages.length) return fail(res, new Error('messages[] is required'));
-  const result = await chat(messages);
+  const last = [...messages].reverse().find((m: any) => m.role === 'user')?.content || '';
+  const result = await chatOnce({
+    messages,
+    approveAll: true,
+    sessionId: req.body?.sessionId,
+    context: req.body?.context,
+  });
+  await persistTurn(req.body?.sessionId, last, result.text, result.traces);
   res.json(result);
 }));
 
+/**
+ * Streaming turn over Server-Sent Events.
+ *
+ * Events: meta → (delta | reasoning | tool)* → done, or → approval when a
+ * mutating tool needs a human. `approval` ends the stream: the client either
+ * resumes it with the token or drops it.
+ */
+app.post('/v1/ai/chat/stream', guard('project.read'), async (req, res) => {
+  const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  if (!messages.length) return fail(res, new Error('messages[] is required'));
+
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+
+  startSse(res);
+  const last = [...messages].reverse().find((m: any) => m.role === 'user')?.content || '';
+  const sessionId = req.body?.sessionId;
+  let text = '';
+
+  try {
+    for await (const ev of runAgent({
+      messages,
+      approvals: req.body?.approvals,
+      approveAll: !!req.body?.approveAll,
+      sessionId,
+      context: req.body?.context,
+      signal: controller.signal,
+    })) {
+      if (ev.type === 'delta') text += ev.text;
+      if (ev.type === 'done') {
+        // Persist before announcing completion so a client that immediately
+        // refetches the sidebar sees the turn.
+        await persistTurn(sessionId, last, ev.text || text, ev.traces);
+      }
+      sendSse(res, ev);
+    }
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') sendSse(res, { type: 'error', message: e?.message || String(e) });
+  } finally {
+    res.end();
+  }
+});
+
+/** Continue a turn the agent parked for approval. */
+app.post('/v1/ai/resume', guard('project.read'), async (req, res) => {
+  const token = String(req.body?.token || '');
+  if (!token) return fail(res, new Error('token is required'));
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+  startSse(res);
+  let text = '';
+  try {
+    for await (const ev of resumeAgent(token, {
+      approved: req.body?.approved || [],
+      denied: req.body?.denied || [],
+    })) {
+      if (ev.type === 'delta') text += ev.text;
+      if (ev.type === 'done' && req.body?.sessionId) {
+        await persistTurn(req.body.sessionId, String(req.body?.userText || ''), ev.text || text, ev.traces);
+      }
+      sendSse(res, ev);
+    }
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') sendSse(res, { type: 'error', message: e?.message || String(e) });
+  } finally {
+    res.end();
+  }
+});
+
+function startSse(res: express.Response) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+}
+
+function sendSse(res: express.Response, ev: AgentEvent) {
+  if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+}
+
+async function persistTurn(sessionId: unknown, userText: string, assistantText: string, traces: unknown[]) {
+  if (typeof sessionId !== 'string' || !sessionId) return;
+  try {
+    aiSessions.saveTurn(sessionId, userText, assistantText, traces);
+    bus.publish({ type: 'ai', action: 'chat', resource: sessionId });
+  } catch (e: any) {
+    console.warn('[ai] failed to persist turn:', e?.message);
+  }
+}
+
+/* --------------------------------------------------------- ai sessions */
+
+app.get('/v1/ai/sessions', guard('project.read'), (_req, res) => {
+  res.json({ total: aiSessions.listSessions().length, sessions: aiSessions.listSessions() });
+});
+
+app.post('/v1/ai/sessions', guard('project.read'), wrap((req, res) => {
+  const cfg = getAiConfig();
+  const session = aiSessions.createSession({
+    title: req.body?.title,
+    model: cfg.model,
+    provider: cfg.provider,
+  });
+  res.status(201).json(session);
+}));
+
+app.get('/v1/ai/sessions/:id', guard('project.read'), wrap((req, res) => {
+  const session = aiSessions.getSession(req.params.id);
+  if (!session) return fail(res, new Error('Session not found'), 404);
+  res.json({ session, messages: aiSessions.listMessages(session.id) });
+}));
+
+app.patch('/v1/ai/sessions/:id', guard('project.read'), wrap((req, res) => {
+  const session = aiSessions.renameSession(req.params.id, String(req.body?.title || ''));
+  if (!session) return fail(res, new Error('Session not found'), 404);
+  res.json(session);
+}));
+
+app.delete('/v1/ai/sessions/:id', guard('project.read'), wrap((req, res) => {
+  res.json({ ok: aiSessions.deleteSession(req.params.id) });
+}));
+
+/* ------------------------------------------------------------- settings */
+
 app.post('/v1/settings/ai', wrap((req, res) => {
-  const { apiKey, model } = req.body || {};
-  if (typeof apiKey === 'string') store.setSetting('deepseek_api_key', apiKey.trim());
-  if (typeof model === 'string' && model.trim()) store.setSetting('deepseek_model', model.trim());
+  const { apiKey, model, provider, baseUrl } = req.body || {};
+  const current = getAiConfig();
+  if (typeof provider === 'string' && provider.trim()) {
+    if (!['deepseek', 'openai', 'ollama', 'custom'].includes(provider.trim())) {
+      return fail(res, new Error('provider must be one of deepseek, openai, ollama, custom'));
+    }
+    store.setSetting('ai_provider', provider.trim());
+  }
+  if (typeof baseUrl === 'string') store.setSetting('ai_base_url', baseUrl.trim());
+  if (typeof model === 'string' && model.trim()) store.setSetting('ai_model', model.trim());
+  if (typeof apiKey === 'string' && apiKey.trim()) {
+    // Store under the active provider so switching back and forth keeps both keys.
+    store.setSetting(`${provider || current.provider}_api_key`, apiKey.trim());
+  }
+  if (apiKey === '') store.setSetting(`${provider || current.provider}_api_key`, '');
   res.json({ ok: true, ...maskedAi() });
 }));
 
@@ -638,14 +817,61 @@ app.get('/v1/settings/ai', (_req, res) => res.json(maskedAi()));
 
 function maskedAi() {
   const cfg = getAiConfig();
-  const stored = store.getSetting('deepseek_api_key') || '';
-  const envKey = process.env.DEEPSEEK_API_KEY || '';
+  const envKey = process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY || '';
+  const stored = store.getSetting(`${cfg.provider}_api_key`) || store.getSetting('ai_api_key') || '';
   const source = envKey ? 'env' : stored ? 'settings' : 'none';
   return {
-    configured: cfg.configured, model: cfg.model, source,
+    configured: cfg.configured,
+    provider: cfg.provider,
+    providerLabel: cfg.label,
+    model: cfg.model,
+    baseUrl: cfg.baseUrl,
+    keyless: cfg.keyless,
+    source,
     keyPreview: cfg.key ? cfg.key.slice(0, 5) + '••••••••' + cfg.key.slice(-4) : '',
   };
 }
+
+/* -------------------------------------------------------------- webhooks */
+
+app.get('/v1/webhooks', guard('project.read'), (_req, res) => {
+  res.json({ total: webhooks.listWebhooks().length, webhooks: webhooks.listWebhooks() });
+});
+
+app.post('/v1/webhooks', guard('project.write'), wrap((req, res) => {
+  const hook = webhooks.createWebhook(req.body || {});
+  // The secret is returned exactly once; the list endpoint never includes it.
+  res.status(201).json({ ...hook, secret: webhooks.webhookSecret(hook.id) });
+}));
+
+app.get('/v1/webhooks/deliveries', guard('project.read'), wrap((req, res) => {
+  const hookId = typeof req.query.webhookId === 'string' ? req.query.webhookId : undefined;
+  res.json({ deliveries: webhooks.listDeliveries(hookId, Number(req.query.limit) || 50) });
+}));
+
+app.patch('/v1/webhooks/:id', guard('project.write'), wrap((req, res) => {
+  const hook = webhooks.updateWebhook(req.params.id, req.body || {});
+  if (!hook) return fail(res, new Error('Webhook not found'), 404);
+  res.json(hook);
+}));
+
+app.delete('/v1/webhooks/:id', guard('project.write'), wrap((req, res) => {
+  res.json({ ok: webhooks.deleteWebhook(req.params.id) });
+}));
+
+app.post('/v1/webhooks/:id/rotate', guard('project.write'), wrap((req, res) => {
+  const hook = webhooks.rotateSecret(req.params.id);
+  if (!hook) return fail(res, new Error('Webhook not found'), 404);
+  res.json({ ...hook, secret: webhooks.webhookSecret(hook.id) });
+}));
+
+app.post('/v1/webhooks/:id/test', guard('project.write'), wrap(async (req, res) => {
+  res.json({ ok: true, delivery: await webhooks.testWebhook(req.params.id) });
+}));
+
+app.get('/v1/webhooks/:id/deliveries', guard('project.read'), wrap((req, res) => {
+  res.json({ deliveries: webhooks.listDeliveries(req.params.id, Number(req.query.limit) || 50) });
+}));
 
 /* ------------------------------------------------------------------ docs */
 app.get('/v1/docs/raw', (_req, res) => {
@@ -692,9 +918,11 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 schedules.startScheduler();
 startRateLimitSweeper();
+webhooks.startWebhookDispatcher();
 
 const PORT = Number(process.env.PORT) || 5174;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  ⚡ Studio BaaS API ready on http://localhost:${PORT}`);
-  console.log(`  → DeepSeek: ${getAiConfig().configured ? 'configured' : 'demo mode (no API key)'}\n`);
+  const ai = getAiConfig();
+  console.log(`  → AI: ${ai.label} · ${ai.model} · ${ai.configured ? 'live' : 'demo mode (no API key)'}\n`);
 });

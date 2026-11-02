@@ -15,10 +15,15 @@ export default function Settings() {
   const { t, lang, setLang } = useI18n();
   const { mode, setMode } = useTheme();
   const [project, setProject] = useState<any>(null);
-  const [ai, setAi] = useState<{ configured: boolean; model: string; source: string; keyPreview: string } | null>(null);
+  const [ai, setAi] = useState<{
+    configured: boolean; provider: string; providerLabel: string; model: string;
+    baseUrl: string; keyless: boolean; source: string; keyPreview: string;
+  } | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('deepseek-chat');
+  const [provider, setProvider] = useState('deepseek');
+  const [baseUrl, setBaseUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [newKey, setNewKey] = useState(false);
   const [keyForm, setKeyForm] = useState({ name: '', scopes: ['databases.read', 'databases.write'] });
@@ -30,6 +35,8 @@ export default function Settings() {
       setProject(p);
       setAi(a);
       setModel(a.model);
+      setProvider(a.provider);
+      setBaseUrl(a.baseUrl);
       setKeys(k.keys);
     } catch (e: any) { toast.push(e.message, 'err'); }
   };
@@ -38,7 +45,7 @@ export default function Settings() {
   const saveAi = async () => {
     setSaving(true);
     try {
-      const r = await api.saveAiSettings({ apiKey, model });
+      const r = await api.saveAiSettings({ apiKey, model, provider, baseUrl });
       setAi(r);
       setApiKey('');
       toast.push(t('AI configuration saved'));
@@ -144,7 +151,7 @@ export default function Settings() {
               <div className="flex" style={{ gap: 8 }}>
                 <Brain size={15} style={{ color: 'var(--violet-text)' }} />
                 <div>
-                  <div className="card-title">{t('AI operator · DeepSeek')}</div>
+                  <div className="card-title">{t('AI operator · {provider}', { provider: ai?.providerLabel || 'DeepSeek' })}</div>
                   <div className="card-sub">{t('Powers the console assistant with tool-calling across every service')}</div>
                 </div>
               </div>
@@ -153,27 +160,70 @@ export default function Settings() {
               </div>
             </div>
             <div className="card-body">
-              <div className="input-row" style={{ gridTemplateColumns: 'minmax(0,1.4fr) minmax(0,1fr)' }}>
+              <div className="input-row" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)' }}>
                 <div className="field">
-                  <label className="label">{t('DeepSeek API key')}</label>
-                  <input
-                    className="input mono" type="password" placeholder={ai?.keyPreview || 'sk-…'}
-                    value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-                  />
-                  <div className="hint">
-                    {ai?.source === 'env' ? t('Loaded from the DEEPSEEK_API_KEY environment variable (takes precedence).')
-                      : ai?.source === 'settings' ? t('Stored in project settings · {preview}', { preview: ai.keyPreview })
-                        : t('No key yet — the assistant runs in demo mode with a local rule engine that still executes real tools.')}
-                  </div>
+                  <label className="label">{t('Provider')}</label>
+                  <select
+                    className="select"
+                    value={provider}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setProvider(next);
+                      // Presets exist so switching provider does not leave a
+                      // half-configured form behind.
+                      const preset: Record<string, { baseUrl: string; model: string }> = {
+                        deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+                        openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+                        ollama: { baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.1' },
+                        custom: { baseUrl: '', model: '' },
+                      };
+                      setBaseUrl(preset[next]?.baseUrl ?? '');
+                      setModel(preset[next]?.model ?? '');
+                    }}
+                  >
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="ollama">Ollama (local)</option>
+                    <option value="custom">Custom / gateway</option>
+                  </select>
+                  <div className="hint">{t('Any OpenAI-compatible endpoint works.')}</div>
                 </div>
                 <div className="field">
                   <label className="label">{t('Model')}</label>
-                  <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
-                    <option value="deepseek-chat">deepseek-chat</option>
-                    <option value="deepseek-reasoner">deepseek-reasoner</option>
-                  </select>
-                  <div className="hint">{t('OpenAI-compatible endpoint · api.deepseek.com')}</div>
+                  <input
+                    className="input mono" list="ai-models" value={model}
+                    onChange={(e) => setModel(e.target.value)} placeholder="deepseek-chat"
+                  />
+                  <datalist id="ai-models">
+                    <option value="deepseek-chat" />
+                    <option value="deepseek-reasoner" />
+                    <option value="gpt-4o-mini" />
+                    <option value="gpt-4o" />
+                    <option value="llama3.1" />
+                  </datalist>
+                  <div className="hint">{t('Tool calling must be supported.')}</div>
                 </div>
+              </div>
+              <div className="field">
+                <label className="label">{t('API key')}</label>
+                <input
+                  className="input mono" type="password"
+                  placeholder={ai?.keyPreview || (provider === 'ollama' ? t('not required for a local server') : 'sk-…')}
+                  value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                />
+                <div className="hint">
+                  {ai?.source === 'env' ? t('Loaded from an environment variable (takes precedence).')
+                    : ai?.source === 'settings' ? t('Stored in project settings · {preview}', { preview: ai.keyPreview })
+                      : t('No key yet — the assistant runs in demo mode with a local rule engine that still executes real tools.')}
+                </div>
+              </div>
+              <div className="field">
+                <label className="label">{t('Base URL')}</label>
+                <input
+                  className="input mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={provider === 'ollama' ? 'http://127.0.0.1:11434/v1' : 'https://api.deepseek.com'}
+                />
+                <div className="hint">{t('Leave the default unless you route through a gateway.')}</div>
               </div>
               <div className="flex">
                 <button className="btn primary" onClick={saveAi} disabled={saving}>{saving ? t('Saving…') : t('Save AI settings')}</button>
