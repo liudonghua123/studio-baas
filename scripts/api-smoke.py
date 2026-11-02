@@ -516,8 +516,128 @@ if s == 201:
     s, gone, _ = call('GET', f'/v1/databases/collections/{icid}/indexes')
     check('indexes', 'deleting the collection takes its indexes with it', s == 404, f'{s} {gone}')
 
+# ----------------------------------------------------- 12 batch & webhooks
+s, bc, _ = call('POST', '/v1/databases/collections', {'name': f'Bulk {TAG}', 'key': f'bulk-{TAG}'})
+bcid = bc.get('id') if s == 201 else None
+check('bulk', 'collection for batch insert', bool(bcid), f'{s} {bc}')
+if bcid:
+    call('POST', f'/v1/databases/collections/{bcid}/attributes', {'key': 'name', 'type': 'string', 'required': True})
+    call('POST', f'/v1/databases/collections/{bcid}/attributes', {'key': 'n', 'type': 'integer'})
+    s, r, _ = call('POST', f'/v1/databases/collections/{bcid}/documents/bulk',
+                   {'documents': [{'name': 'a', 'n': 1}, {'name': 'b', 'n': 2}, {'name': 'c', 'n': 3}]})
+    check('bulk', 'three documents in one call', s == 201 and r.get('total') == 3, f'{s} {r}')
+
+    s, r, _ = call('GET', f'/v1/databases/collections/{bcid}/documents')
+    check('bulk', 'all rows are visible afterwards', r.get('total') == 3, f'{r.get("total")}')
+
+    # one bad row must reject the whole batch — a partial import is worse than none
+    s, r, _ = call('POST', f'/v1/databases/collections/{bcid}/documents/bulk',
+                   {'documents': [{'name': 'ok', 'n': 4}, {'n': 5}]})
+    check('bulk', 'invalid row rejects the batch', s == 400 and 'documents[1]' in str(r.get('error', '')), f'{s} {r}')
+
+    s, r, _ = call('GET', f'/v1/databases/collections/{bcid}/documents')
+    check('bulk', 'rejected batch wrote nothing', r.get('total') == 3, f'{r.get("total")}')
+
+    s, r, _ = call('POST', f'/v1/databases/collections/{bcid}/documents/bulk', {'documents': []})
+    check('bulk', 'empty batch is a 400', s == 400, f'{s} {r}')
+
+# ---- a real receiver, so delivery + signature are verified end to end
+import threading, http.server
+_hits = []
+class _Receiver(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get('content-length') or 0)
+        body = self.rfile.read(n)
+        try: parsed = json.loads(body)
+        except Exception: parsed = None
+        _hits.append({'event': self.headers.get('x-studio-event'), 'sig': self.headers.get('x-studio-signature'), 'body': parsed, 'raw': body.decode('utf-8', 'replace')})
+        self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+    def log_message(self, *a): pass
+
+_srv = http.server.HTTPServer(('127.0.0.1', 5211), _Receiver)
+threading.Thread(target=_srv.serve_forever, daemon=True).start()
+
+s, hook, _ = call('POST', '/v1/webhooks', {'url': 'http://127.0.0.1:5211/hook', 'events': ['document.*'], 'description': 'smoke'})
+hid = hook.get('id') if s == 201 else None
+secret = hook.get('secret') if s == 201 else ''
+check('webhooks', 'create returns a one-time secret', s == 201 and len(str(secret)) >= 32, f'{s} {str(secret)[:12]}')
+
+if hid:
+    s, lst, _ = call('GET', '/v1/webhooks')
+    row = next((w for w in lst.get('webhooks', []) if w['id'] == hid), {})
+    check('webhooks', 'list never exposes the secret', s == 200 and 'secret' not in row, f'{row}')
+
+    if bcid:
+        _hits.clear()
+        call('POST', f'/v1/databases/collections/{bcid}/documents', {'name': 'hooked', 'n': 9})
+        time.sleep(1.2)
+        check('webhooks', 'document.create reaches the endpoint', any(h['event'] == 'document.create' for h in _hits), f'{len(_hits)} hits')
+
+        hit = next((h for h in _hits if h['event'] == 'document.create'), None)
+        if hit:
+            import hmac, hashlib
+            ts, sig = (hit['sig'] or '').split(',') if hit['sig'] else ('', '')
+            expect = hmac.new(secret.encode(), f"{ts[2:]}.{hit['raw']}".encode(), hashlib.sha256).hexdigest()
+            check('webhooks', 'HMAC signature verifies', hmac.compare_digest(expect, sig[3:]), f'{hit["sig"]}')
+
+    s, d, _ = call('POST', f'/v1/webhooks/{hid}/test')
+    check('webhooks', 'test delivery succeeds', s == 200 and (d.get('delivery') or {}).get('status') == 200, f'{s} {d}')
+
+    s, d, _ = call('GET', f'/v1/webhooks/{hid}/deliveries')
+    check('webhooks', 'delivery log records attempts', s == 200 and len(d.get('deliveries', [])) >= 1, f'{len(d.get("deliveries", []))}')
+
+    s, r, _ = call('PATCH', f'/v1/webhooks/{hid}', {'enabled': False})
+    check('webhooks', 'disable a subscription', s == 200 and r.get('enabled') is False, f'{s} {r}')
+
+    s, r, _ = call('DELETE', f'/v1/webhooks/{hid}')
+    check('webhooks', 'delete removes it', s == 200 and r.get('ok') is True, f'{s} {r}')
+
+# --------------------------------------------------------------- 13 ai agent
+s, st, _ = call('GET', '/v1/ai/status')
+check('ai', 'status reports a provider and mode', s == 200 and st.get('providerId') and st.get('mode') in ('live', 'demo'), f'{s} {st.get("providerId")} {st.get("mode")}')
+check('ai', 'tools carry a danger flag', any(t.get('dangerous') is True for t in st.get('tools', []))
+      and any(t.get('dangerous') is False for t in st.get('tools', [])), f'{len(st.get("tools", []))} tools')
+
+s, sess, _ = call('POST', '/v1/ai/sessions', {})
+sid_ai = sess.get('id') if s == 201 else None
+check('ai', 'create a conversation', bool(sid_ai) and sess.get('title') == 'New conversation', f'{s} {sess}')
+
+if sid_ai:
+    s, r, _ = call('POST', '/v1/ai/chat', {'messages': [{'role': 'user', 'content': '列出所有集合'}], 'sessionId': sid_ai})
+    check('ai', 'a turn runs tools and answers', s == 200 and r.get('text') and r.get('traces'), f'{s} {str(r)[:120]}')
+
+    s, sid_data, _ = call('GET', f'/v1/ai/sessions/{sid_ai}')
+    msgs = sid_data.get('messages', [])
+    check('ai', 'user + assistant turns are persisted', len(msgs) == 2 and sid_data['session']['title'] != 'New conversation',
+          f'{len(msgs)} msgs, title={sid_data["session"]["title"]!r}')
+    check('ai', 'tool trace survives the round trip', bool(msgs and msgs[-1].get('traces')), f'{msgs[-1].get("traces") if msgs else None}')
+
+    s, r, _ = call('PATCH', f'/v1/ai/sessions/{sid_ai}', {'title': 'Renamed thread'})
+    check('ai', 'rename a conversation', s == 200 and r.get('title') == 'Renamed thread', f'{s} {r}')
+
+    s, r, _ = call('DELETE', f'/v1/ai/sessions/{sid_ai}')
+    check('ai', 'delete a conversation', s == 200 and r.get('ok') is True, f'{s} {r}')
+
+    s, r, _ = call('GET', f'/v1/ai/sessions/{sid_ai}')
+    check('ai', 'deleted conversation is gone', s == 404, f'{s} {r}')
+
+# RBAC must hold for the agent too: the tool list is filtered, and an
+# out-of-role write is refused before it reaches the store.
+s, vst, _ = call('GET', '/v1/ai/status', act_as='viewer')
+vnames = [t['name'] for t in vst.get('tools', [])]
+check('ai', 'viewer tool list excludes writes', s == 200 and 'delete_collection' not in vnames and 'list_collections' in vnames,
+      f'{s} {len(vnames)} tools')
+
+s, vr, _ = call('POST', '/v1/ai/chat', {'messages': [{'role': 'user', 'content': '删除 Notes 集合'}]}, act_as='viewer')
+check('ai', 'viewer cannot delete through the agent',
+      s == 200 and ('缺少权限' in str(vr.get('text', '')) or 'Missing permission' in str(vr.get('text', ''))),
+      str(vr.get('text', ''))[:140])
+
+_srv.shutdown()
+
 # ------------------------------------------------------------------ cleanup
-for path in [f'/v1/functions/{fnid}' if fnid else None,
+for path in [f'/v1/databases/collections/{bcid}' if bcid else None,
+             f'/v1/functions/{fnid}' if fnid else None,
              f'/v1/sites/{sid}' if sid else None,
              f'/v1/storage/buckets/{bid}' if bid else None,
              f'/v1/databases/collections/{cid}' if cid else None,
