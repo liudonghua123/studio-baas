@@ -165,6 +165,35 @@ export function migrate() {
     verifier TEXT, nonce TEXT, returnTo TEXT, appOrigin TEXT, callbackUrl TEXT,
     createdAt TEXT NOT NULL, expiresAt TEXT NOT NULL
   );
+  -- 第二因素：TOTP 存密文 secret，WebAuthn 存 COSE 公钥与 credential id。
+  -- 一个用户可以有多个（手机 + 笔记本的 Touch ID），approvedAt 为空的 TOTP 还没被验证过，
+  -- 不能被用来登录 —— 否则「添加上一步失败」就等于给自己留了个死胡同。
+  CREATE TABLE IF NOT EXISTS mfaMethods (
+    id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL,
+    secret TEXT, credentialId TEXT, publicKey TEXT, algorithm INTEGER,
+    counter INTEGER DEFAULT 0, transports TEXT, aaguid TEXT,
+    verifiedAt TEXT, lastUsedAt TEXT, lastCounter INTEGER,
+    createdAt TEXT NOT NULL
+  );
+  -- 恢复码：只存 sha256，用掉即删。每次重新生成会清空旧的一批
+  CREATE TABLE IF NOT EXISTS mfaRecoveryCodes (
+    id TEXT PRIMARY KEY, userId TEXT NOT NULL, codeHash TEXT NOT NULL,
+    usedAt TEXT, createdAt TEXT NOT NULL
+  );
+  -- 策略：按角色或按人要求 / 豁免二次验证。空表 = 不强制
+  CREATE TABLE IF NOT EXISTS mfaPolicies (
+    id TEXT PRIMARY KEY, projectId TEXT NOT NULL,
+    scope TEXT NOT NULL, target TEXT NOT NULL,
+    mode TEXT NOT NULL, createdAt TEXT NOT NULL,
+    UNIQUE(projectId, scope, target)
+  );
+  -- 登录第一步（密码 / SSO / LDAP）通过后的一次性票据：换会话必须完成第二因素。
+  -- 把「已证明的第一因素」和「待证明的第二因素」分开，避免半登录状态拿到会话。
+  CREATE TABLE IF NOT EXISTS mfaChallenges (
+    id TEXT PRIMARY KEY, userId TEXT NOT NULL, projectId TEXT NOT NULL,
+    kind TEXT NOT NULL, purpose TEXT NOT NULL, data TEXT,
+    attempts INTEGER DEFAULT 0, createdAt TEXT NOT NULL, expiresAt TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_docs_col ON documents(collectionId);
   CREATE INDEX IF NOT EXISTS idx_logs_time ON logs(createdAt);
   CREATE INDEX IF NOT EXISTS idx_exec_fn ON executions(functionId);
@@ -182,6 +211,10 @@ export function migrate() {
   CREATE INDEX IF NOT EXISTS idx_authProviders_project ON authProviders(projectId);
   CREATE INDEX IF NOT EXISTS idx_authIdentities_user ON authIdentities(userId);
   CREATE INDEX IF NOT EXISTS idx_authStates_expiry ON authStates(expiresAt);
+  CREATE INDEX IF NOT EXISTS idx_mfaMethods_user ON mfaMethods(userId);
+  CREATE INDEX IF NOT EXISTS idx_mfaRecovery_user ON mfaRecoveryCodes(userId);
+  CREATE INDEX IF NOT EXISTS idx_mfaPolicies_project ON mfaPolicies(projectId);
+  CREATE INDEX IF NOT EXISTS idx_mfaChallenges_expiry ON mfaChallenges(expiresAt);
   `);
 
   /* ------------------------------------------- project scoping columns */
@@ -218,6 +251,12 @@ export function migrate() {
 
   /* -------------------------------------------- function versions (v1.8) */
   backfillFunctionVersions();
+
+  /* ------------------------------------------------ step-up auth (v1.12) */
+  // assurance: 'single' 只有第一因素 | 'multi' 通过了第二因素 | 'pending' 策略要求但还没过
+  addColumn('sessions', 'assurance', "TEXT DEFAULT 'single'");
+  addColumn('sessions', 'mfaAt', 'TEXT');
+  db.exec("UPDATE sessions SET assurance='single' WHERE assurance IS NULL OR assurance=''");
 }
 
 /**

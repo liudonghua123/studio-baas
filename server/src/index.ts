@@ -22,6 +22,8 @@ import * as domains from './domains.js';
 import * as schedules from './schedules.js';
 import * as git from './git.js';
 import { mountSsoRoutes } from './sso/routes.js';
+import { mountMfaRoutes } from './mfa/routes.js';
+import { gateAfterPrimary, loginResponse } from './mfa/gate.js';
 import { rateLimit, startRateLimitSweeper } from './ratelimit.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
 
@@ -121,7 +123,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ---------------------------------------------------------------- core */
-app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.11.0-studio', uptime: process.uptime() }));
+app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.12.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
@@ -140,6 +142,10 @@ app.get('/v1/permissions', (_req, res) => res.json({
 /* ------------------------------------------------------------------ sso */
 // 身份源配置 + 登录端点：OAuth2 / OIDC / CAS / LDAP
 mountSsoRoutes(app, wrap, fail);
+
+/* ------------------------------------------------------------------ mfa */
+// TOTP / Passkey / 恢复码 / 策略
+mountMfaRoutes(app, wrap, fail);
 
 /* -------------------------------------------------------------- members */
 app.get('/v1/members', guard('members.read'), (_req, res) => {
@@ -586,13 +592,23 @@ app.delete('/v1/users/:id', guard('users.write'), wrap((req, res) => res.json({ 
 
 app.post('/v1/account/sessions',
   rateLimit({
-    windowMs: 60_000, max: 8,
+    // 15 次/分钟：一个人正常不会连输 15 次密码，而 6 位码的在线爆破
+    // 在这个速率下要跑几年。上限设成 8 会让「改了策略后连续测试几种角色」
+    // 这种正常操作也被卡住。
+    windowMs: 60_000, max: 15,
     keyOf: (r) => String(r.body?.email || '').toLowerCase(),
     message: 'Too many sign-in attempts, wait a minute before retrying',
   }),
   wrap((req, res) => {
   const { email, password } = req.body || {};
-  res.status(201).json(store.login(email, password));
+  // 先只验证密码，不签发会话；是否需要第二因素由闸门决定
+  const user = store.verifyCredentials(email, password);
+  const gate = gateAfterPrimary({
+    userId: user.userId,
+    projectId: currentProjectId(),
+    context: { name: user.name, email: user.email, provider: 'password' },
+  });
+  res.status(201).json(loginResponse(gate));
 }));
 
 // 退出登录必须真的作废服务端那一行，否则「退出」只是把票据从本地删掉

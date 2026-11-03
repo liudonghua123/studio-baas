@@ -1,7 +1,7 @@
 import { db, now, uid } from '../db.js';
 import { bus } from '../events.js';
 import * as members from '../members.js';
-import { issueSession } from '../store.js';
+import { gateAfterPrimary, loginResponse } from '../mfa/gate.js';
 import { ldapAuthenticate } from './ldap.js';
 import {
   discover, pkceChallenge, randomToken, verifyIdToken,
@@ -28,19 +28,14 @@ export interface SsoProfile {
   raw: Record<string, unknown>;
 }
 
-export interface SsoSession {
-  userId: string;
-  sessionId: string;
-  secret: string;
-  expiresAt: string;
-  name: string;
-  email: string;
-  provider: string;
-  role: string | null;
-  /** 首次登录时自动加入项目，前端可以据此提示「已按默认角色加入」 */
-  joined: boolean;
-  isNewUser: boolean;
-}
+/**
+ * 登录成功的响应体。
+ *
+ * 两种形状：直接带 secret 的完整会话，或 `{ mfaRequired, challenge }`
+ * ——后者说明第一因素过了，但策略要求第二因素，前端要弹出验证码框。
+ * 用联合类型而不是两个接口，是为了让调用方无法「忘掉」这个分支。
+ */
+export type SsoLoginResponse = Record<string, unknown> & { mfaRequired?: boolean };
 
 const TIMEOUT = 10_000;
 
@@ -171,7 +166,7 @@ export interface CallbackInput {
 }
 
 export interface CallbackResult {
-  session: SsoSession;
+  login: SsoLoginResponse;
   returnTo: string;
   appOrigin: string;
 }
@@ -211,21 +206,29 @@ export async function handleCallback(provider: AuthProvider, input: CallbackInpu
   }
 
   const outcome = provisionUser(provider, profile);
-  const session = issueSession(outcome.userId);
   const role = members.roleOf(provider.projectId, outcome.userId);
+  const returnTo = safeReturnTo(row.returnTo);
 
   db.prepare('UPDATE authIdentities SET lastLoginAt=? WHERE providerId=? AND subject=?')
     .run(now(), provider.id, profile.subject);
 
-  return {
-    session: {
-      ...session,
+  // 第一因素已证明（IdP 签名的断言），交给闸门决定是否还要第二因素
+  const gate = gateAfterPrimary({
+    userId: outcome.userId,
+    projectId: provider.projectId,
+    context: {
       provider: provider.name,
       role,
       joined: outcome.joined,
       isNewUser: outcome.isNewUser,
+      returnTo,
+      providerId: provider.id,
     },
-    returnTo: safeReturnTo(row.returnTo),
+  });
+
+  return {
+    login: loginResponse(gate),
+    returnTo,
     appOrigin: row.appOrigin || '',
   };
 }
@@ -381,7 +384,7 @@ const unescapeXml = (s: string) =>
   s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
 /* -------------------------------------------------------------- LDAP */
-export async function handleLdapLogin(provider: AuthProvider, username: string, password: string): Promise<SsoSession> {
+export async function handleLdapLogin(provider: AuthProvider, username: string, password: string): Promise<SsoLoginResponse> {
   const cfg = decryptConfig(provider.type, provider.config) as LdapConfigStored;
   const profile = await ldapAuthenticate(cfg, username, password);
 
@@ -395,15 +398,21 @@ export async function handleLdapLogin(provider: AuthProvider, username: string, 
     subject: profile.subject, email: profile.email, emailVerified: true,
     name: profile.name, raw: profile.raw,
   });
-  const session = issueSession(outcome.userId);
   db.prepare('UPDATE authIdentities SET lastLoginAt=? WHERE providerId=? AND subject=?')
     .run(now(), provider.id, profile.subject);
 
-  return {
-    ...session, provider: provider.name,
-    role: members.roleOf(provider.projectId, outcome.userId),
-    joined: outcome.joined, isNewUser: outcome.isNewUser,
-  };
+  const gate = gateAfterPrimary({
+    userId: outcome.userId,
+    projectId: provider.projectId,
+    context: {
+      provider: provider.name,
+      role: members.roleOf(provider.projectId, outcome.userId),
+      joined: outcome.joined,
+      isNewUser: outcome.isNewUser,
+      providerId: provider.id,
+    },
+  });
+  return loginResponse(gate);
 }
 
 /* --------------------------------------------------------- provisioning */

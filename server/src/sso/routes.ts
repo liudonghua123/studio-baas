@@ -200,14 +200,16 @@ export function mountSsoRoutes(app: express.Express, wrap: Wrap, fail: Fail) {
         callbackUrl: callbackUrlFor(req, p.id),
       }, state));
 
-      const params = new URLSearchParams({
-        secret: result.session.secret,
-        returnTo: result.returnTo,
-        provider: p.name,
-        role: result.session.role || '',
-        joined: result.session.joined ? '1' : '0',
-      });
-      // 会话票据放 fragment：不发给服务端、不进代理日志、不经 Referer 外泄
+      // 会话票据放 fragment：不发给服务端、不进代理日志、不经 Referer 外泄。
+      // 需要第二因素时这里只带 challenge —— 票据还没签发，没什么可泄露的。
+      const params = new URLSearchParams({ returnTo: result.returnTo, provider: p.name });
+      if (result.login.mfaRequired) {
+        params.set('challenge', String(result.login.challenge || ''));
+      } else {
+        params.set('secret', String(result.login.secret || ''));
+        params.set('role', String(result.login.role || ''));
+        params.set('joined', result.login.joined ? '1' : '0');
+      }
       return res.redirect(302, `${origin}/login#${params.toString()}`);
     } catch (e: any) {
       return redirectError(res, origin, e?.message || 'Sign-in failed');

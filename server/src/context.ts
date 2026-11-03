@@ -14,6 +14,14 @@ export interface Principal {
   /** 携带了凭据但无效（key 已删除、会话过期）时为 true，路由层据此返回 401 */
   invalid?: boolean;
   invalidReason?: string;
+  /**
+   * 策略要求第二因素但这次登录还没过（会话 assurance='pending'）。
+   * guard 只放行 /v1/auth/mfa/* 与 /v1/auth/me，其余一律 403 —— 用户能
+   * 进「绑定第二因素」这一条窄缝，进不了别的地方。
+   */
+  mfaPending?: boolean;
+  /** 本次会话是否真的过了第二因素，界面据此显示「已验证」 */
+  mfaVerified?: boolean;
 }
 
 export interface RequestContext {

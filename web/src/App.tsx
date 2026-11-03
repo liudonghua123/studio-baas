@@ -1,7 +1,7 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/ui';
-import { AuthProvider } from './lib/auth';
+import { AuthProvider, useAuth } from './lib/auth';
 import { LocaleProvider } from './lib/locale';
 import { ThemeProvider } from './lib/theme';
 import Overview from './pages/Overview';
@@ -22,10 +22,26 @@ import Members from './pages/Members';
 import Webhooks from './pages/Webhooks';
 import Login from './pages/Login';
 
+/**
+ * 半登录状态（策略要求第二因素但还没绑定）只能待在安全设置页。
+ *
+ * 服务端已经用 403 拦住了所有业务接口，这里再拦一次是为了给出「为什么」：
+ * 否则用户点侧栏只会看到一串 toast 报错，不知道自己被卡在哪。
+ */
+function MfaGate({ children }: { children: React.ReactNode }) {
+  const { me } = useAuth();
+  const loc = useLocation();
+  if (me?.principal?.mfaPending && loc.pathname !== '/settings') {
+    return <Navigate to="/settings?focus=mfa" replace />;
+  }
+  return <>{children}</>;
+}
+
 /** 控制台外壳：侧栏 + 顶栏 + 页面 */
 function Console() {
   return (
     <Layout>
+      <MfaGate>
       <Routes>
         <Route path="/" element={<Overview />} />
         <Route path="/databases" element={<Databases />} />
@@ -46,6 +62,7 @@ function Console() {
         <Route path="/ai" element={<AI />} />
         <Route path="*" element={<Overview />} />
       </Routes>
+      </MfaGate>
     </Layout>
   );
 }

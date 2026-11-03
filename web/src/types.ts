@@ -95,7 +95,13 @@ export interface Member {
   avatarColor: string; role: string; status: string; addedAt: string;
 }
 export interface Me {
-  principal: { type: string; id: string; name: string; role?: string; scopes?: string[] };
+  principal: {
+    type: string; id: string; name: string; role?: string; scopes?: string[];
+    /** 策略要求第二因素但这次登录还没过：只能去安全设置 */
+    mfaPending?: boolean;
+    /** 这次会话真的过了第二因素 */
+    mfaVerified?: boolean;
+  };
   projectId: string; role: string; permissions: string[];
 }
 export interface Message {
@@ -198,3 +204,82 @@ export interface SsoSession {
   name: string; email: string; provider: string;
   role: string | null; joined: boolean; isNewUser: boolean;
 }
+
+/* ------------------------------------------------------------- MFA / 2FA */
+
+export type MfaMethodType = 'totp' | 'webauthn';
+export type MfaReason = 'user-required' | 'user-exempt' | 'role-required' | 'role-exempt' | 'not-configured';
+
+export interface MfaMethod {
+  id: string;
+  type: MfaMethodType;
+  name: string;
+  /** false = 生成的 TOTP 还没被验证过，不能用来登录 */
+  verified: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+  transports: string[];
+  aaguid: string | null;
+}
+
+export interface MfaAvailable {
+  totp: boolean;
+  passkeys: { id: string; name: string; transports: string[] }[];
+  recoveryCodesLeft: number;
+  enrolled: boolean;
+}
+
+export interface MfaStatus {
+  methods: MfaMethod[];
+  verifiedMethods: number;
+  recoveryCodesLeft: number;
+  required: boolean;
+  reason: MfaReason;
+  projectId: string | null;
+  role: string | null;
+  /** 当前这次会话是否已经过了第二因素 */
+  sessionVerified: boolean;
+  /** 会话处于「只能去绑第二因素」的受限状态 */
+  pending: boolean;
+}
+
+export interface MfaPolicy {
+  id: string;
+  projectId: string;
+  scope: 'role' | 'user';
+  target: string;
+  mode: 'required' | 'exempt';
+  createdAt: string;
+}
+
+export interface MfaGap { userId: string; name: string; email: string; role: string }
+
+/** 密码 / SSO / LDAP 登录的两种结局：直接给票据，或给一张待验证的挑战 */
+export interface LoginSession {
+  secret: string;
+  userId: string;
+  sessionId: string;
+  expiresAt: string;
+  name: string;
+  email: string;
+  assurance: 'single' | 'multi' | 'pending';
+  mfaEnrollmentRequired?: boolean;
+  provider?: string;
+  role?: string;
+  joined?: boolean;
+  isNewUser?: boolean;
+}
+
+export interface LoginChallenge {
+  mfaRequired: true;
+  challenge: string;
+  expiresAt: string;
+  methods: MfaAvailable;
+  reason: MfaReason;
+  provider?: string;
+  role?: string;
+  name?: string;
+  email?: string;
+}
+
+export type LoginResult = LoginSession | LoginChallenge;

@@ -8,6 +8,7 @@ import { LANGS } from '../lib/i18n';
 import { useI18n } from '../lib/locale';
 import { useTheme } from '../lib/theme';
 import SsoCard from '../components/SsoCard';
+import MfaCard from '../components/MfaCard';
 
 const SCOPES = ['databases.read', 'databases.write', 'storage.read', 'storage.write', 'functions.execute', 'users.read', 'users.write', 'sites.write'];
 
@@ -76,6 +77,8 @@ export default function Settings() {
 
       {!project ? <Loading /> : (
         <div className="stack">
+          <MfaCard />
+
           <div className="card">
             <div className="card-head">
               <div className="card-title">{t('Project')}</div>

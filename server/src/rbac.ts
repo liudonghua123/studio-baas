@@ -56,6 +56,10 @@ export const PERMISSIONS: PermissionDef[] = [
   { id: 'sso.read', group: 'Auth', label: 'View identity providers', roles: ADM },
   { id: 'sso.write', group: 'Auth', label: 'Configure SSO / LDAP', roles: ADM },
 
+  // 策略决定「谁必须开二次验证」——能改它就能把某个角色从强制名单里拿掉
+  { id: 'mfa.read', group: 'Auth', label: 'View two-factor policy', roles: ADM },
+  { id: 'mfa.write', group: 'Auth', label: 'Change two-factor policy', roles: ADM },
+
   { id: 'messaging.read', group: 'Messaging', label: 'Read messages', roles: DEV },
   { id: 'messaging.write', group: 'Messaging', label: 'Send messages', roles: DEV },
 

@@ -67,19 +67,30 @@ export function resolveAuth(req: express.Request, fallbackProjectId = 'studio'):
     ).get(session) as any;
     if (row && new Date(row.expiresAt).getTime() > Date.now()) {
       const own = members.roleOf(fallbackProjectId, row.userId) || 'viewer';
+      const assurance = row.assurance || 'single';
+      // 半登录状态不允许「以角色查看」：它本来就是个降权开关，
+      // 而此刻要做的事情（绑定第二因素）与角色无关，多一层身份切换只会误导
+      if (assurance === 'pending') {
+        return {
+          principal: {
+            type: 'user', id: row.userId, name: row.name,
+            role: own, mfaPending: true, mfaVerified: false,
+          },
+        };
+      }
       // 只能「往下看」：viewer 不能借这个头把自己变成 owner
       if (wantActAs && actAsAllowedFor(own) && RANK[actAs!] <= RANK[own]) {
         return {
           principal: {
             type: 'user', id: row.userId, name: row.name,
-            role: actAs!,
+            role: actAs!, mfaVerified: assurance === 'multi',
           },
         };
       }
       return {
         principal: {
           type: 'user', id: row.userId, name: row.name,
-          role: own,
+          role: own, mfaVerified: assurance === 'multi',
         },
       };
     }
@@ -131,6 +142,21 @@ export function can(permission: string, principal: Principal | null = currentPri
   return roleAllows(principal.role, permission);
 }
 
+/**
+ * 半登录会话能碰的路径。
+ *
+ * 只有「证明第二因素」和「看清楚自己是谁」这两件事应该被允许 ——
+ * 其余全部 403。这里的白名单必须按前缀精确匹配，不能用 includes，
+ * 否则 `/v1/auth/mfa/../../databases` 这类路径会骗过判断。
+ */
+const MFA_PENDING_ALLOWED = [
+  /^\/v1\/auth\/mfa(\/|$)/,
+  /^\/v1\/auth\/me$/,
+  /^\/v1\/permissions$/,
+  /^\/v1\/account\/sessions$/,
+  /^\/v1\/health$/,
+];
+
 /** 路由守卫：无权限直接 403，并告知需要哪个权限点 */
 export function guard(permission: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -143,6 +169,13 @@ export function guard(permission: string) {
     }
     if (!principal) {
       return res.status(401).json({ ok: false, code: 'unauthenticated', error: 'Authentication required' });
+    }
+    if (principal.mfaPending && !MFA_PENDING_ALLOWED.some((re) => re.test(req.path))) {
+      return res.status(403).json({
+        ok: false, code: 'mfa_required',
+        error: 'Finish setting up two-factor authentication before using the console',
+        enrollUrl: '/settings?focus=mfa',
+      });
     }
     if (!can(permission, principal)) {
       return res.status(403).json({

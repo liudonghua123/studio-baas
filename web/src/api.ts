@@ -3,7 +3,7 @@ import type {
   FileItem, FunctionDef, FunctionDomain, FunctionVersion, CollectionIndex, QueryPlan, GitCommit, GitDeploy, GitIntegration,
   LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
   AiSession, AiMessage, AgentEvent, Webhook, WebhookDelivery,
-  PublicProvider, IdentityProvider, SsoSession,
+  PublicProvider, IdentityProvider, MfaStatus, MfaMethod, MfaPolicy, MfaGap, MfaAvailable, LoginResult,
 } from './types';
 
 export const PROJECT_KEY = 'studio.project';
@@ -41,6 +41,7 @@ const get = <T>(p: string) => request<T>(p);
 const post = <T>(p: string, body?: any) => request<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
 const patch = <T>(p: string, body?: any) => request<T>(p, { method: 'PATCH', body: JSON.stringify(body || {}) });
 const del = <T>(p: string) => request<T>(p, { method: 'DELETE' });
+const put = <T>(p: string, body?: any) => request<T>(p, { method: 'PUT', body: JSON.stringify(body || {}) });
 
 /**
  * Consume an SSE endpoint (`/v1/ai/chat/stream`, `/v1/ai/resume`).
@@ -238,10 +239,39 @@ export const api = {
   startSso: (id: string, returnTo: string) =>
     post<{ url: string; state: string }>(`/v1/auth/sso/${id}/start`, { returnTo }),
   ldapLogin: (id: string, username: string, password: string) =>
-    post<SsoSession>(`/v1/auth/sso/${id}/login`, { username, password }),
+    post<LoginResult>(`/v1/auth/sso/${id}/login`, { username, password }),
   logout: () => del<{ ok: boolean }>('/v1/account/sessions'),
   passwordLogin: (email: string, password: string) =>
-    post<{ secret: string; userId: string; name: string; email: string }>('/v1/account/sessions', { email, password }),
+    post<LoginResult>('/v1/account/sessions', { email, password }),
+
+  /* -------------------------------------------------------------- MFA */
+  mfaStatus: () => get<MfaStatus>('/v1/auth/mfa'),
+  // 登录第二步：挑战 id 换回可用方式（不含任何账号信息）
+  mfaChallenge: (id: string) =>
+    get<{ challenge: string; expiresAt: string; methods: MfaAvailable; reason: any; provider: string | null }>(
+      `/v1/auth/mfa/challenge/${encodeURIComponent(id)}`),
+  mfaTotpBegin: (name?: string) =>
+    post<{ methodId: string; secret: string; uri: string }>('/v1/auth/mfa/totp/begin', { name }),
+  mfaTotpConfirm: (methodId: string, code: string) =>
+    post<{ ok: boolean; recoveryCodes: string[] }>('/v1/auth/mfa/totp/confirm', { methodId, code }),
+  mfaPasskeyBegin: (name?: string) =>
+    post<{ ticket: string; options: any }>('/v1/auth/mfa/webauthn/begin', { name }),
+  mfaPasskeyFinish: (ticket: string, response: any) =>
+    post<{ ok: boolean; method: MfaMethod; recoveryCodesLeft: number }>('/v1/auth/mfa/webauthn/finish', { ticket, response }),
+  mfaRename: (id: string, name: string) => patch<MfaMethod>(`/v1/auth/mfa/methods/${id}`, { name }),
+  mfaDelete: (id: string) =>
+    del<{ ok: boolean; remaining: number; warning: string | null }>(`/v1/auth/mfa/methods/${id}`),
+  mfaRegenerateRecovery: () =>
+    post<{ codes: string[] }>('/v1/auth/mfa/recovery/regenerate'),
+  mfaVerify: (challenge: string, code: string, method?: string) =>
+    post<LoginResult & { factor: string }>('/v1/auth/mfa/verify', { challenge, code, method }),
+  mfaAssertBegin: (challenge: string) =>
+    post<{ ticket: string; options: any }>('/v1/auth/mfa/webauthn/assert/begin', { challenge }),
+  mfaAssertFinish: (ticket: string, response: any) =>
+    post<LoginResult & { factor: string }>('/v1/auth/mfa/webauthn/assert/finish', { ticket, response }),
+  mfaPolicies: () => get<{ policies: MfaPolicy[]; gaps: MfaGap[]; roles: string[] }>('/v1/auth/mfa/policies'),
+  mfaSavePolicies: (policies: { scope: string; target: string; mode: string }[]) =>
+    put<{ policies: MfaPolicy[]; gaps: MfaGap[] }>('/v1/auth/mfa/policies', { policies }),
 
   docs: () => get<{ title: string; markdown: string }>('/v1/docs'),
 

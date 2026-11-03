@@ -7,6 +7,7 @@ import { executeFunctionCode, type ExecContext } from './runtime.js';
 import { currentProjectId, currentPrincipal } from './context.js';
 import { parseQueries } from './query.js';
 import { hashApiKey, newApiKeySecret, previewApiKey } from './apikey.js';
+import { purgeUser } from './mfa/methods.js';
 import {
   listIndexes, createIndex as createIndexRow, deleteIndex as deleteIndexRow,
   dropIndexesForCollection, indexesOnAttribute, translateConstraintError,
@@ -967,6 +968,10 @@ export function deleteUser(id: string) {
   const cur = db.prepare('SELECT * FROM users WHERE id=?').get(id) as any;
   if (!cur) return false;
   db.prepare('DELETE FROM sessions WHERE userId=?').run(id);
+  // 第二因素、恢复码、未完成的挑战都跟着走：用户 id 会被回收，
+  // 留下旧密钥等于下一个拿到同一 id 的人继承前一个人的认证器
+  purgeUser(id);
+  db.prepare("DELETE FROM mfaPolicies WHERE scope='user' AND target=?").run(id);
   db.prepare('DELETE FROM users WHERE id=?').run(id);
   bus.publish({ type: 'user', action: 'delete', resource: cur.name });
   return true;
@@ -976,19 +981,53 @@ export function deleteUser(id: string) {
  * 发一个控制台会话。密码登录和 SSO 登录共用同一条落库路径，
  * 免得两种入口的过期时间/字段悄悄分叉。
  */
-export function issueSession(userId: string) {
+export type Assurance = 'single' | 'multi' | 'pending';
+
+export interface IssuedSession {
+  userId: string;
+  sessionId: string;
+  secret: string;
+  expiresAt: string;
+  name: string;
+  email: string;
+  assurance: Assurance;
+}
+
+/**
+ * 签发会话。
+ *
+ * assurance 记录这次登录「证明了几个因素」：
+ *   single  —— 只过了第一因素（策略没要求时的常态）
+ *   multi   —— 过了第二因素
+ *   pending —— 策略要求但还没过；guard 只放行安全设置相关的接口
+ *
+ * 放在会话行上而不是只在内存里，是因为进程重启后「半登录」状态
+ * 不能突然变成完整权限。
+ */
+export function issueSession(userId: string, opts: { assurance?: Assurance } = {}): IssuedSession {
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(userId) as any;
   if (!u) throw new Error('User not found');
   if (u.status && u.status !== 'active') throw new Error(`Account is ${u.status}`);
+  const assurance: Assurance = opts.assurance || 'single';
   const id = uid('sess_');
   const secret = crypto.randomBytes(24).toString('hex');
   const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
-  db.prepare('INSERT INTO sessions (id,userId,secret,expiresAt,createdAt) VALUES (?,?,?,?,?)').run(id, u.id, secret, expiresAt, now());
+  db.prepare(
+    'INSERT INTO sessions (id,userId,secret,expiresAt,createdAt,assurance,mfaAt) VALUES (?,?,?,?,?,?,?)',
+  ).run(id, u.id, secret, expiresAt, now(), assurance, assurance === 'multi' ? now() : null);
   db.prepare('UPDATE users SET lastLoginAt=? WHERE id=?').run(now(), u.id);
-  return { userId: u.id, sessionId: id, secret, expiresAt, name: u.name, email: u.email };
+  return {
+    userId: u.id, sessionId: id, secret, expiresAt, name: u.name, email: u.email, assurance,
+  };
 }
 
-export function login(email: string, password: string) {
+/**
+ * 只验证密码，不签发会话。
+ *
+ * 拆出来是因为登录现在有两个阶段：密码对了不代表能进（策略可能要求
+ * 第二因素）。若这里顺手 issueSession，第二因素就成了摆设。
+ */
+export function verifyCredentials(email: string, password: string): { userId: string; name: string; email: string } {
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').toLowerCase()) as any;
   if (!u) throw new Error('Invalid credentials');
   if (!verifyPassword(password, u.passwordHash)) throw new Error('Invalid credentials');
@@ -996,7 +1035,12 @@ export function login(email: string, password: string) {
     // 登录成功时顺手把旧哈希升级为「每用户盐」格式
     db.prepare('UPDATE users SET passwordHash=? WHERE id=?').run(hashPassword(password), u.id);
   }
-  return issueSession(u.id);
+  return { userId: u.id, name: u.name, email: u.email };
+}
+
+export function login(email: string, password: string) {
+  const u = verifyCredentials(email, password);
+  return issueSession(u.userId);
 }
 
 /* --------------------------------------------------------------- messaging */

@@ -325,4 +325,95 @@ export const zhShell: Dict = {
   'Allowed email domains': '允许的邮箱域',
   'Comma separated. Empty means any domain the provider vouches for.':
     '逗号分隔。留空表示接受身份源担保的任意域。',
+  /* ------------------------------------------------- two-factor / passkey */
+  'Two-factor authentication': '二次验证',
+  'A second proof of identity on top of your password': '在密码之外，再证明一次你是谁',
+  'Authenticator app': '认证器 App',
+  Passkey: 'Passkey',
+  'Your role requires two-factor authentication': '你的角色要求开启二次验证',
+  'Add an authenticator app or a passkey to unlock the rest of the console. Until then only this page is available.':
+    '添加认证器 App 或 Passkey 后，控制台的其余部分才会解锁；在那之前只能待在这一页。',
+  'Two-factor is required for your role and it is set up': '你的角色要求二次验证，且已设置完成',
+  'You will be asked for it every time you sign in.': '每次登录都会要求你验证。',
+  'Two-factor is on for your account': '你的账号已开启二次验证',
+  'Two-factor is not required for you': '你没有被要求开启二次验证',
+  'Your project does not force it, but you can keep it on — it costs 20 seconds per sign-in.':
+    '项目没有强制要求，但你可以主动开着——每次登录多花 20 秒。',
+  'You can add it anyway; an admin can also require it for a role or a person.':
+    '你也可以主动添加；管理员还可以按角色或按人强制要求。',
+  'No second factor yet': '还没有第二因素',
+  'Use an authenticator app (TOTP) or a passkey. Recovery codes are issued once the first factor is confirmed.':
+    '用认证器 App（TOTP）或 Passkey。恢复码会在第一个因素确认后发放。',
+  'Recovery codes left: {n}': '剩余恢复码：{n}',
+  'Generate new codes': '生成新的恢复码',
+  'Who must use it': '谁必须使用',
+  'Rules apply per project. A person-level exemption beats every role rule.':
+    '规则按项目生效。针对个人的豁免优先于任何角色规则。',
+  'Edit policy': '编辑策略',
+  'No rule yet — two-factor is optional for everyone in this project.':
+    '还没有规则——这个项目里所有人都是可选。',
+  required: '强制',
+  exempt: '豁免',
+  'Required but not set up ({n})': '要求开启但尚未设置（{n}）',
+  'Your role ({role}) is on the list, so you will be challenged at sign-in.':
+    '你的角色（{role}）在名单里，登录时会被要求验证。',
+  'Save these recovery codes': '保存这些恢复码',
+  'Add an authenticator app': '添加认证器 App',
+  'Each code works once. They are shown only now.': '每个码只能用一次，且只显示这一次。',
+  'Any TOTP app works: 1Password, Authy, Google Authenticator, Microsoft Authenticator.':
+    '任何 TOTP App 都可以：1Password、Authy、Google Authenticator、Microsoft Authenticator。',
+  'Verify and enable': '验证并启用',
+  'Secret key': '密钥',
+  'Choose “Enter a setup key manually” in the app, then paste this key.':
+    '在 App 里选「手动输入设置密钥」，然后粘贴这串密钥。',
+  'Code from the app': 'App 中的验证码',
+  'Copy setup link (otpauth://)': '复制设置链接（otpauth://）',
+  'Copy all': '全部复制',
+  Download: '下载',
+  'Add a passkey': '添加 Passkey',
+  'Your browser will ask for your fingerprint, face or device PIN.': '浏览器会要求你的指纹、面容或设备 PIN。',
+  Continue: '继续',
+  'e.g. MacBook Touch ID': '例如：MacBook 触控 ID',
+  'The private key never leaves your device. The server only stores the public half.':
+    '私钥永远不会离开你的设备，服务端只保存公钥。',
+  'Two-factor policy': '二次验证策略',
+  'Require a second factor for a role or a specific person. Exemptions always win.':
+    '按角色或按人要求第二因素。豁免总是优先。',
+  'Save policy': '保存策略',
+  'By role': '按角色',
+  'By person': '按人',
+  'No rule — two-factor stays optional.': '没有规则——二次验证保持可选。',
+  'People who must use it but have not set it up can still sign in — they land on this page and can go nowhere else until they do.':
+    '被要求但还没设置的人仍然可以登录——他们会落到这一页，在设置完成前哪儿也去不了。',
+  'One more step': '还差一步',
+  'Password accepted — now confirm your second factor.': '密码已验证——现在确认你的第二因素。',
+  'This account is protected by two-factor authentication. Confirm it is you to finish signing in.':
+    '这个账号开启了二次验证。确认是你本人，就能完成登录。',
+  'A 6-digit code from your authenticator app': '认证器 App 里的 6 位数字',
+  'Or a passkey — your fingerprint, face or device PIN': '或者用 Passkey——指纹、面容或设备 PIN',
+  'No session is issued until this step succeeds': '这一步通过之前，不会签发任何会话',
+  'Back to sign-in': '返回登录',
+  'Signed in with {provider} — now confirm your second factor.': '已通过 {provider} 登录——现在确认你的第二因素。',
+  'Recovery code': '恢复码',
+  'Verification code': '验证码',
+  'Paste one of the recovery codes you saved when you set this up. Each code works once.':
+    '粘贴设置时保存的恢复码之一。每个码只能用一次。',
+  'Open your authenticator app and type the current code.': '打开认证器 App，输入当前的验证码。',
+  'Verify and sign in': '验证并登录',
+  'Use a passkey instead': '改用 Passkey',
+  'Use an authenticator code': '改用认证器验证码',
+  'Use a recovery code': '使用恢复码',
+  'You have no recovery codes left for this account.': '这个账号的恢复码已经用完了。',
+  'Authenticator added': '认证器已添加',
+  'Passkey added': 'Passkey 已添加',
+  'Remove "{name}"? You will not be able to use it to sign in any more.': '移除「{name}」？之后不能再拿它登录。',
+  'Second factor removed': '第二因素已移除',
+  'Generate a new set of recovery codes? The old ones stop working immediately.':
+    '生成一套新的恢复码？旧的会立即失效。',
+  'That rule already exists': '这条规则已存在',
+  'Two-factor policy saved': '二次验证策略已保存',
+  owner: '所有者',
+  admin: '管理员',
+  developer: '开发者',
+  viewer: '只读成员',
 };
