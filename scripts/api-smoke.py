@@ -4,7 +4,7 @@
 用法：pnpm dev 起服务后 `python3 scripts/api-smoke.py`；
 退出码非 0 表示有断言失败，可直接接进 CI。
 """
-import json, urllib.request, urllib.error, urllib.parse, uuid, sys, time
+import base64, hashlib, hmac, json, struct, urllib.request, urllib.error, urllib.parse, uuid, sys, time
 
 BASE = 'http://localhost:5174'
 results = []
@@ -50,6 +50,15 @@ def call(method, path, body=None, project='studio', act_as=None, key=None, raw=N
             continue
         return s, js, hd
     return s, js, hd
+
+
+def totp(secret_b32, at=None, digits=6, period=30):
+    """独立实现，用来给被测服务端算码。"""
+    key = base64.b32decode(secret_b32 + '=' * ((8 - len(secret_b32) % 8) % 8))
+    counter = int((at if at is not None else time.time()) // period)
+    mac = hmac.new(key, struct.pack('>Q', counter), hashlib.sha1).digest()
+    off = mac[-1] & 0x0F
+    return str((struct.unpack('>I', mac[off:off + 4])[0] & 0x7FFFFFFF) % (10 ** digits)).zfill(digits)
 
 
 def check(area, name, ok, detail=''):
@@ -709,6 +718,77 @@ if idp_id:
 
     s, r, _ = call('DELETE', f'/v1/auth/sso/config/{idp_id}')
     check('sso', 'delete a provider', s == 200 and r.get('ok') is True, f'{s}')
+
+
+# -------------------------------------------------------------- 15 mfa / 2fa
+# 完整流程（含 Passkey 与强制注册）由 scripts/mfa-e2e.mjs / passkey-e2e.mjs 覆盖；
+# 这里只钉住接口契约与权限边界。
+s, r, _ = call('GET', '/v1/auth/mfa')
+before_methods = len(r.get('methods') or []) if s == 200 else -1
+check('mfa', 'status is readable', s == 200 and 'recoveryCodesLeft' in r, f'{s} {r}')
+
+s, r, _ = call('POST', '/v1/auth/mfa/totp/begin', {'name': 'smoke'})
+secret = r.get('secret') if s == 201 else None
+mfa_mid = r.get('methodId') if s == 201 else None
+check('mfa', 'totp enrollment returns a secret and an otpauth URI',
+      s == 201 and bool(secret) and str(r.get('uri', '')).startswith('otpauth://totp/'), f'{s} {str(r)[:120]}')
+
+s, r, _ = call('POST', '/v1/auth/mfa/totp/confirm', {'methodId': mfa_mid, 'code': '000000'})
+check('mfa', 'a wrong code cannot confirm enrollment', s == 400, f'{s}')
+
+s, r, _ = call('POST', '/v1/auth/mfa/totp/confirm', {'methodId': mfa_mid, 'code': totp(secret) if secret else '000000'})
+codes = (r.get('recoveryCodes') or []) if s == 200 else []
+check('mfa', 'confirmation issues ten recovery codes', s == 200 and len(codes) == 10, f'{s} {str(r)[:120]}')
+
+s, r, _ = call('GET', '/v1/auth/mfa')
+check('mfa', 'the method is now verified',
+      s == 200 and len(r.get('methods') or []) == before_methods + 1, f'{s} {r.get("verifiedMethods")}')
+
+s, r, _ = call('PUT', '/v1/auth/mfa/policies', {'policies': []}, act_as='developer')
+check('mfa', 'a developer cannot change the policy', s == 403, f'{s}')
+
+s, r, _ = call('GET', '/v1/auth/mfa/policies', act_as='viewer')
+check('mfa', 'a viewer cannot read the policy', s == 403, f'{s}')
+
+s, r, _ = call('PUT', '/v1/auth/mfa/policies', {'policies': [{'scope': 'role', 'target': 'wizard', 'mode': 'required'}]})
+check('mfa', 'an unknown role is refused', s == 400, f'{s} {str(r)[:100]}')
+
+s, r, _ = call('PUT', '/v1/auth/mfa/policies', {'policies': [
+    {'scope': 'role', 'target': 'owner', 'mode': 'required'},
+    {'scope': 'role', 'target': 'owner', 'mode': 'exempt'},
+]})
+check('mfa', 'duplicate rules are refused', s == 400, f'{s} {str(r)[:100]}')
+
+s, r, _ = call('PUT', '/v1/auth/mfa/policies', {'policies': [{'scope': 'role', 'target': 'owner', 'mode': 'required'}]})
+check('mfa', 'a valid policy is saved', s == 200 and len(r.get('policies') or []) == 1, f'{s}')
+
+s, r, _ = call('POST', '/v1/account/sessions', {'email': 'alex@aurora.io', 'password': 'aurora-demo'})
+challenge = r.get('challenge') if isinstance(r, dict) else None
+check('mfa', 'sign-in now returns a challenge, not a session',
+      s == 201 and r.get('mfaRequired') is True and bool(challenge) and 'secret' not in r, f'{s} {str(r)[:120]}')
+
+s, r, _ = call('POST', '/v1/auth/mfa/verify', {'challenge': challenge, 'code': '000000'})
+check('mfa', 'a wrong code is rejected', s == 401, f'{s}')
+
+# 绑定那一步已经用掉了当前步长，这里用下一窗口（服务端允许 ±1 的时钟漂移）
+next_code = totp(secret, time.time() + 30) if secret else '000000'
+s, r, _ = call('POST', '/v1/auth/mfa/verify', {'challenge': challenge, 'code': next_code})
+check('mfa', 'a valid code yields a multi-factor session',
+      s == 200 and r.get('assurance') == 'multi' and bool(r.get('secret')), f'{s} {str(r)[:120]}')
+
+s2, r2, _ = call('POST', '/v1/account/sessions', {'email': 'alex@aurora.io', 'password': 'aurora-demo'})
+s, r, _ = call('POST', '/v1/auth/mfa/verify', {'challenge': r2.get('challenge') if isinstance(r2, dict) else None, 'code': next_code})
+check('mfa', 'the same code cannot be used twice', s == 401, f'{s}')
+
+s, r, _ = call('POST', '/v1/auth/mfa/verify', {'challenge': 'not-a-real-challenge', 'code': '123456'})
+check('mfa', 'an unknown challenge is refused', s in (401, 410), f'{s}')
+
+s, r, _ = call('GET', '/v1/auth/mfa/challenge/not-a-real-challenge')
+check('mfa', 'an unknown challenge lookup is 410', s == 410, f'{s}')
+
+s, r, _ = call('PUT', '/v1/auth/mfa/policies', {'policies': []})
+if mfa_mid:
+    call('DELETE', f'/v1/auth/mfa/methods/{mfa_mid}')
 
 _srv.shutdown()
 
