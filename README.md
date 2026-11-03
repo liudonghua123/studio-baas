@@ -151,6 +151,42 @@ curl -X POST localhost:5174/v1/auth/sso/<id>/start -H 'origin: http://localhost:
 
 **安全默认值**：`state` 一次性、10 分钟过期，PKCE 自带，`redirect_uri` 与换取 token 时逐字一致；会话票据走 URL fragment（不进服务端日志、不外泄 Referer）；`clientSecret` / `bindPassword` 用 AES-256-GCM 加密落库，接口只回 `••••1234`；同邮箱并入已有账号**只在 IdP 声明 `email_verified` 时**发生；`returnTo` 只接受站内相对路径。
 
+### 二次验证：TOTP、Passkey，按角色或按人强制
+
+![Two-factor](./docs/screenshots/40-mfa-challenge.png)
+
+密码对了不代表能进。策略可以要求 `admin` / `owner`（或某个具体的人）在登录时再证明一次，方式有两种，也可以同时存在：
+
+| 方式 | 实现 |
+|---|---|
+| **TOTP** | RFC 6238，SHA1 / 6 位 / 30 秒，允许 ±1 个步长的时钟漂移；同一个时间步的码只能用一次 |
+| **Passkey** | WebAuthn，支持 P-256 / P-384 / P-521、RSA、Ed25519；CBOR、COSE、`authData` 全部自己解析，不引依赖 |
+| **恢复码** | 绑定成功时发 10 个，sha256 存储，用掉即删；丢了手机还能进来 |
+
+登录分成两步：第一因素（密码 / SSO / LDAP）通过后，服务端**不发会话**，只发一张 5 分钟的一次性挑战；第二因素过了才签发 `assurance=multi` 的会话。中间状态无法伪造——挑战 id 是 32 字节随机串，换不到任何业务接口。
+
+![Two-factor settings](./docs/screenshots/41-mfa-settings.png)
+
+```bash
+# 让所有 admin 必须开二次验证；某个服务账号豁免
+curl -X PUT localhost:5174/v1/auth/mfa/policies -H 'content-type: application/json' -d '{
+  "policies": [
+    {"scope":"role","target":"admin","mode":"required"},
+    {"scope":"user","target":"usr_ci_bot","mode":"exempt"}
+  ]
+}'
+```
+
+**强制注册的引导问题**：策略要求但这个人一个因素都没绑时，直接拒绝登录会把他永久锁在门外。所以这里发的是 `assurance=pending` 的受限会话：能打开设置页绑 TOTP / Passkey，**其他接口一律 403**。绑完还需要重新登录一次——否则「拿到密码的人自己绑一个认证器」就等于绕过了第二因素。
+
+**边界**（都是测试逼出来的，不是设计时想到的）：
+
+- 挑战只有 5 次机会，第 5 次之后整张挑战作废，必须重新走第一因素；
+- TOTP 记录上次成功的步长，窗口内重叠的旧码不能用第二次；
+- Passkey 校验 `signCount`，回退视为密钥被克隆；
+- `rpId` 必须是域名——用 IP 访问时 Passkey 按钮直接不显示，服务端也会拒绝，而不是让浏览器抛一个看不懂的 `SecurityError`；
+- 恢复码、TOTP secret 与身份源的密钥走同一套 AES-256-GCM 静态加密；删除用户时连带清理，避免 id 回收后新用户继承旧认证器。
+
 ## 功能一览
 
 | 模块 | 能力 |
@@ -166,6 +202,7 @@ curl -X POST localhost:5174/v1/auth/sso/<id>/start -H 'origin: http://localhost:
 | **Members** | 4 种角色 × 22 个权限点、邀请/改角色/移除、以角色预览、权限矩阵 |
 | **Sites** | 多文件在线编辑、iframe 实时预览、三档视口、防抖自动保存、部署与构建日志 |
 | **Auth** | 用户 CRUD、active / unverified / blocked、标签、scrypt 密码、会话登录 |
+| **2FA** | **TOTP（RFC 6238）、Passkey / WebAuthn、恢复码、按角色或按人的强制与豁免、半登录强制注册** |
 | **SSO** | **OIDC（discovery + JWKS 验签 + PKCE）**、**OAuth 2.0**、**CAS 2.0/3.0**、**LDAP / AD bind**、登录页自动列源、连接测试、默认角色、邮箱域白名单 |
 | **Messaging** | Email / SMS / Push 统一发送与投递日志 |
 | **Logs** | 请求日志 SSE 实时 tail、按服务与状态码过滤 |
@@ -275,6 +312,7 @@ studio-baas/
 │   ├── webhooks.ts            # 事件订阅与签名投递
 │   ├── secrets.ts             # AES-256-GCM 静态加密
 │   ├── sso/                   # 身份源：providers / flow / routes / jwt / ldap / ber
+│   ├── mfa/                   # 二次验证：totp / webauthn / cbor / policy / gate / routes
 │   ├── seed.ts                # 演示数据
 │   └── events.ts              # SSE 事件总线
 └── web/src/
@@ -318,6 +356,12 @@ studio-baas/
 | GET/POST | `/v1/users` | 用户列表 / 创建 |
 | POST | `/v1/messaging/messages` | 发送消息 |
 | POST | `/v1/ai/chat` | AI 对话（含工具轨迹） |
+| GET | `/v1/auth/mfa` | 我的第二因素、恢复码余量与策略状态 |
+| POST | `/v1/auth/mfa/totp/begin` `/confirm` | 绑定认证器 App（先出密钥，再用一次验证码确认） |
+| POST | `/v1/auth/mfa/webauthn/begin` `/finish` | 注册 Passkey |
+| POST | `/v1/auth/mfa/verify` | 登录第二步：TOTP / 恢复码换会话 |
+| POST | `/v1/auth/mfa/webauthn/assert/begin` `/finish` | 登录第二步：Passkey 换会话 |
+| GET/PUT | `/v1/auth/mfa/policies` | 强制 / 豁免规则（`mfa.read` / `mfa.write`） |
 | GET | `/v1/auth/sso/providers` | 登录页：可用的身份源（只含 id/type/name） |
 | GET/POST | `/v1/auth/sso/config` | 身份源列表 / 新增（`sso.read` / `sso.write`） |
 | PATCH/DELETE | `/v1/auth/sso/config/:id` | 修改 / 删除（连带身份映射） |
@@ -338,6 +382,7 @@ studio-baas/
 - API Key 只存 SHA-256 摘要，明文仅在创建响应里出现一次，列表只显示预览；
 - SSO 的 `clientSecret` / `bindPassword` 以 AES-256-GCM 密文入库，密钥来自 `STUDIO_SECRET_KEY` 或 `data/.secret-key`（0600）；接口只返回「已配置 + 尾号」，编辑时留空表示不修改；
 - 外部身份只在两种情况下并入已有账号：该 `(providerId, subject)` 之前绑定过，或 IdP 明确声明邮箱已验证且管理员开启了 `trustEmail` —— 否则一个同名邮箱就能接管本地管理员；
+- 会话带 assurance 等级：`pending` 只能访问 `/v1/auth/mfa/*` 与 `/v1/auth/me`，其余接口 403；TOTP secret 与恢复码同样加密落库；
 - 文件存于本地 `server/data/uploads`，桶加密标记仅为元数据；GitHub token 只存服务端、不回传前端；
 - `x-studio-act-as`（View as role）仅供演示：无凭据时可声明任意角色；**带会话时只能往下看，不能自我提权**；公网部署建议 `STUDIO_ALLOW_ACT_AS=0` 关掉；
 - 不带任何凭据的请求仍按「演示 owner」放行，这是本地体验的取舍——真要上线请把它改成 401；
