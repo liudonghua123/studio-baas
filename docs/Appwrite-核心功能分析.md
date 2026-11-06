@@ -357,7 +357,7 @@ Agent 使用这些工具时的三个工程要求：
 | Collections / Attributes | 类型化 Schema、9 种属性类型、枚举校验 | `server/src/store.ts` |
 | Documents CRUD + 查询 | 分页、搜索、排序、字段校验、行级权限字段 | `store.ts` / `routes` |
 | Storage Buckets / Files | 多桶、扩展名白名单、大小限制、上传/预览/删除 | `store.ts` + `multer` |
-| Functions | 在线编辑、保存、执行、日志、环境变量、执行历史 | `runtime.ts` + `FunctionDetail.tsx` |
+| Functions | 多语言运行时（Node.js / Python）、在线编辑、保存、执行、日志、环境变量、执行历史 | `functions/` + `FunctionDetail.tsx` |
 | Sites | 多文件编辑、iframe 实时预览、设备切换、部署与构建日志 | `SiteDetail.tsx` |
 | Auth | 用户 CRUD、状态、标签、邮箱验证、scrypt 密码、会话 | `store.ts` + `Auth.tsx` |
 | Messaging | Email / SMS / Push 统一发送与投递日志 | `Messaging.tsx` |

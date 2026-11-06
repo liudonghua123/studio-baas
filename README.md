@@ -1,6 +1,6 @@
 # Studio BaaS
 
-**一个用 TypeScript 全栈实现的 BaaS 控制台**：多项目隔离、基于角色的权限、类型化数据库、对象存储、可在线编辑并执行的云函数（支持自定义域名、定时任务、GitHub 仓库部署）、可实时预览的站点托管、用户体系、消息通道，以及一个能用自然语言操作整套平台的 DeepSeek Agent。
+**一个用 TypeScript 全栈实现的 BaaS 控制台**：多项目隔离、基于角色的权限、类型化数据库、对象存储、可在线编辑并执行的云函数（**Node.js / Python 多运行时**，支持自定义域名、定时任务、GitHub 仓库部署）、可实时预览的站点托管、用户体系、消息通道，以及一个能用自然语言操作整套平台的 DeepSeek Agent。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
@@ -14,7 +14,7 @@
 
 ## 这是什么
 
-把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数跑在独立的 worker 线程里（内部仍是 `vm` 沙箱），站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 48 个工具**真实调用**平台 API 而不是只聊天，写操作在执行前必须由人确认。
+把 Appwrite 那套「一个控制台收拢后端七件套」的体验，用 TypeScript 从零复刻了一遍：Express + SQLite 做服务端，React + Vite 做控制台，云函数按语言跑在独立的 worker 线程（JavaScript）或子进程（Python）里，站点支持多文件在线编辑与 iframe 热预览，AI 助手通过 48 个工具**真实调用**平台 API 而不是只聊天，写操作在执行前必须由人确认。
 
 界面本身就是产品的一部分：**中英双语**（顶栏一键切换，英文原文即词条 key）与**亮/暗/跟随系统**三档主题，靠一套 CSS 语义变量撑着；切换不刷新页面，也不动你的数据。
 
@@ -24,8 +24,9 @@
 
 | 文档 | 内容 |
 |---|---|
-| [使用指南](./docs/使用指南.md) | 逐模块截图 + 操作步骤，23 张界面图 |
-| [体验报告与差距分析](./docs/体验报告与差距分析.md) | 73 条 API 断言 + 15 页界面走查，逐项对照 Appwrite，含缺陷清单与路线图 |
+| [使用指南](./docs/使用指南.md) | 逐模块截图 + 操作步骤，含多语言函数与双因素登录 |
+| [函数运行时架构](./docs/函数运行时架构.md) | 旧实现问题分析、多语言运行时分层、`studio-bridge/1` 协议、扩展一门语言、安全边界 |
+| [体验报告与差距分析](./docs/体验报告与差距分析.md) | 175 条 API 断言 + 15 页界面走查，逐项对照 Appwrite，含缺陷清单与路线图 |
 | [Appwrite 核心功能分析](./docs/Appwrite-核心功能分析.md) | 产品定位、架构、七大服务拆解、竞品对比、生产化差距（[PDF 版](./docs/Appwrite-核心功能分析.pdf)） |
 
 ## 核心交互
@@ -82,6 +83,22 @@ export default async ({ req, res, log, databases, env }) => {
 ![Chinese UI](./docs/screenshots/31-dark-zh-dashboard.png)
 
 中文界面不是「整页贴一层翻译」，而是逐句挂词条：英文原文即 key（`t('New project')`），中文条目按页面拆在 `web/src/lib/i18n/zh.*.ts`，缺译回退英文而不是露出裸 key；日期与相对时间（`3m ago` ↔ `3 分钟前`）跟着语言走，字段名、代码、日志原文保持原样。
+
+### 云函数：Node.js 和 Python 跑在同一套界面里
+
+运行时不是装饰字段：创建时选语言，代码、入口文件、语法高亮、执行引擎一起切换。JavaScript 走 `worker_threads` 隔离，Python 走子进程 + 同步 RPC 桥，两者共享同一套 `databases / storage / users / env`。
+
+![Python function](./docs/screenshots/43-function-python.png)
+
+```python
+def handler(ctx):
+    products = ctx.databases.list_documents("products", {"limit": 100})
+    low = [p["data"]["name"] for p in products["documents"] if int(p["data"].get("stock") or 0) < 10]
+    ctx.log("Priced", products["total"], "products")
+    return ctx.res.json({"products": products["total"], "lowStock": low})
+```
+
+新增语言只需要一个 harness 和一个 `registerRuntime()`，控制台自动出现对应选项。设计细节与协议见 [函数运行时架构](./docs/函数运行时架构.md)。
 
 ### 云函数：像 Appwrite 一样绑定域名、跑定时、连 GitHub
 
@@ -194,7 +211,7 @@ curl -X PUT localhost:5174/v1/auth/mfa/policies -H 'content-type: application/js
 | **Dashboard** | 文档/文件/函数/用户指标、14 天流量趋势、服务健康、最近执行、集合分布 |
 | **Databases** | 集合与 9 种类型化属性、文档 CRUD、**原子批量写入（≤500 行）**、Appwrite 风格 `queries[]` 过滤、文档级权限（`read("user:…")` / `team:…/role`）、**key/unique 索引 + EXPLAIN 查询计划**、表单与 JSON 双模式编辑 |
 | **Storage** | 多桶、扩展名白名单、体积限制、拖拽上传、图片预览、直链分享 |
-| **Functions** | 在线编辑（CodeMirror 6）、**每次保存即不可变版本 + 一键回滚**、自定义 payload 执行、**worker 线程隔离执行**、日志/响应/错误、环境变量、执行历史 |
+| **Functions** | 在线编辑（CodeMirror 6）、**Node.js / Python 双运行时**、**每次保存即不可变版本 + 一键回滚**、自定义 payload 执行、**worker 线程 / 子进程隔离**、日志/响应/错误、环境变量、执行历史 |
 | **Domains** | 自定义域名、TXT 校验、证书签发状态、Host 头路由、`DOMAIN_VERIFY_MODE` 真实校验 |
 | **Schedules** | cron 解析与时区、未来三次执行预览、暂停/恢复、立即执行、执行状态回写 |
 | **GitHub** | 仓库/分支/入口文件绑定、Pull/Push、webhook 验签与分支过滤、部署历史、最近提交 |
@@ -226,7 +243,7 @@ pnpm dev            # 控制台 http://localhost:5173 ，API :5174
 pnpm build && pnpm start   # http://localhost:5174
 ```
 
-首次启动自动建库并写入演示数据：2 个项目（**Aurora Commerce** 与 **Nebula Analytics**）、6 个集合、37 条文档、6 个文件、4 个云函数、3 个站点、7 位用户、7 条成员关系、3 个定时任务、1 个已生效域名（`api.aurora.test` → `Order webhook`）、1 个仓库绑定与 2 条部署记录，外加 14 天请求日志。删除 `server/data/` 即可重置。
+首次启动自动建库并写入演示数据：2 个项目（**Aurora Commerce** 与 **Nebula Analytics**）、6 个集合、37 条文档、6 个文件、5 个云函数（含 1 个 Python）、3 个站点、7 位用户、7 条成员关系、3 个定时任务、1 个已生效域名（`api.aurora.test` → `Order webhook`）、1 个仓库绑定与 2 条部署记录，外加 14 天请求日志。删除 `server/data/` 即可重置。
 
 ## 公网访问
 
@@ -277,6 +294,7 @@ export AI_BASE_URL=https://api.deepseek.com   # 可选，走网关时填
 | `AI_MODEL` | provider 默认 | 覆盖模型名 |
 | `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `AI_API_KEY` | — | 任一存在即可；都没有则进入 Demo 模式 |
 | `AI_APPROVAL` | `on` | 设为 `off` 时写操作不再请人确认（不建议） |
+| `STUDIO_PYTHON_BIN` | `python3` | Python 运行时的解释器路径；未安装时 Python 函数会在创建阶段被拒绝 |
 | `STUDIO_SECRET_KEY` | 自动生成 `data/.secret-key` | 加密 SSO 密钥的主密钥（32 字节 hex/base64，或口令派生） |
 | `STUDIO_API_URL` | 由请求推断 | 反代后面用来拼 `redirect_uri` 的公网 API 地址 |
 | `STUDIO_APP_URL` | 由请求 Origin 推断 | SSO 登录成功后的回跳地址 |
@@ -287,7 +305,7 @@ export AI_BASE_URL=https://api.deepseek.com   # 可选，走网关时填
 
 - **前端**：React 18、Vite 6、TypeScript、CodeMirror 6、lucide-react、自研设计系统（无 UI 框架，CSS 变量双主题 + 轻量 i18n 运行时）
 - **后端**：Node.js 22、Express 4、TypeScript、better-sqlite3（WAL）、multer
-- **运行时**：`worker_threads` 独立线程 + Node `vm` 沙箱 + 模块白名单 + 超时终止，ESM 转译
+- **运行时**：可插拔运行时注册表 —— JavaScript 用 `worker_threads` + Node `vm` + 模块白名单 + 超时终止；Python 用子进程 + `studio-bridge/1` stdio 协议 + rlimit + 信号终止
 - **实时**：SSE 事件总线（集合、文档、文件、函数、站点变更）
 - **AI**：OpenAI 兼容 Chat Completions（DeepSeek / OpenAI / Ollama / 自建网关）+ Tool Calling + SSE 流式，最多 8 轮规划，写操作带人工审批
 
@@ -306,7 +324,7 @@ studio-baas/
 │   ├── domains.ts             # 自定义域名与 DNS 校验
 │   ├── cron.ts / schedules.ts # cron 解析、时区、调度器
 │   ├── git.ts                 # GitHub 绑定、pull/push、webhook 验签
-│   ├── runtime.ts             # 云函数沙箱
+│   ├── functions/             # 运行时注册表、JS worker / vm、子进程桥、Python harness
 │   ├── ai.ts                  # 工具注册 + 本地规则引擎
 │   ├── agent/                 # provider 抽象、agent 循环、会话、权限映射
 │   ├── webhooks.ts            # 事件订阅与签名投递
@@ -331,6 +349,7 @@ studio-baas/
 | PATCH/DELETE | `/v1/databases/collections/:id/documents/:docId` | 更新 / 删除 |
 | POST | `/v1/storage/buckets/:id/files` | multipart 上传 |
 | GET | `/v1/storage/files/:id/view` | 文件直链 |
+| GET | `/v1/runtimes` | 运行时清单：语言、版本、入口、可用性、模板 |
 | POST | `/v1/functions/:id/executions` | 执行函数（body 即 payload） |
 | GET/PATCH | `/v1/functions/:id` | 读取 / 保存代码与环境变量 |
 | GET/POST | `/v1/projects` | 项目列表 / 创建 |
@@ -378,7 +397,7 @@ studio-baas/
 - 每个 `/v1` 请求都会解析出 `projectId` + `principal`，store 层查询按项目过滤，路由层用 `guard(permission)` 拦截，越权返回 403；
 - 未提供任何凭据时按「演示 owner」放行，方便本地体验；携带了失效的会话 / Key 则返回 401，不会回退成 owner；
 - 开启集合的 **document security** 后，`read("any" | "users" | "user:<id>" | "team:<id>/<role>")` 会在列表、单条读取、更新、删除四处生效；无 read 权限时单条返回 404，不泄漏存在性；
-- 云函数跑在独立的 `worker_threads` 线程里，超时直接 `terminate()`，死循环不会再拖垮 API（仍是共享内核，不是容器级隔离）；
+- 云函数按运行时隔离：JavaScript 在独立 `worker_threads` 里执行，超时 `terminate()`；Python 在独立子进程里执行，超时杀进程组，并用 rlimit 限制内存/CPU/句柄、屏蔽 socket 出网。两者都是**进程级隔离**，不是容器级安全边界，公网多租户请换成容器运行时；
 - API Key 只存 SHA-256 摘要，明文仅在创建响应里出现一次，列表只显示预览；
 - SSO 的 `clientSecret` / `bindPassword` 以 AES-256-GCM 密文入库，密钥来自 `STUDIO_SECRET_KEY` 或 `data/.secret-key`（0600）；接口只返回「已配置 + 尾号」，编辑时留空表示不修改；
 - 外部身份只在两种情况下并入已有账号：该 `(providerId, subject)` 之前绑定过，或 IdP 明确声明邮箱已验证且管理员开启了 `trustEmail` —— 否则一个同名邮箱就能接管本地管理员；
