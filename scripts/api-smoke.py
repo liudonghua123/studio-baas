@@ -363,6 +363,50 @@ if fnid:
     check('isolation', 'server stays responsive during the loop',
           health.get('status') == 200, f'health={health}')
 
+# ------------------------------------------------- 12b multi-language runtimes
+s, rts, _ = call('GET', '/v1/runtimes')
+rt_list = rts.get('runtimes', []) if isinstance(rts, dict) else []
+node_rt = next((r for r in rt_list if r['id'] == 'node-22'), None)
+py_rt = next((r for r in rt_list if r['id'] == 'python-3'), None)
+check('runtimes', 'runtime registry lists both languages', s == 200 and bool(node_rt) and bool(py_rt), f'{s} {[r["id"] for r in rt_list]}')
+check('runtimes', 'python is available on this host', bool(py_rt) and py_rt['availability']['available'] is True,
+      str(py_rt.get('availability') if py_rt else None))
+
+pyfnid = None
+if py_rt and py_rt['availability']['available']:
+    py_code = ("def handler(ctx):\n"
+               "    docs = ctx.databases.list_documents('products', {'limit': 2})\n"
+               "    ctx.log('py', ctx.req.method)\n"
+               "    return ctx.res.json({'total': docs['total'], 'env': ctx.env.get('PY_FLAG')})\n")
+    s, pf, _ = call('POST', '/v1/functions', {'name': f'Py fn {TAG}', 'runtime': 'python-3',
+                                              'entrypoint': 'main.py', 'code': py_code,
+                                              'env': {'PY_FLAG': 'on'}})
+    check('runtimes', 'create python function', s == 201 and pf.get('entrypoint') == 'main.py', f'{s} {str(pf)[:120]}')
+    pyfnid = pf.get('id') if s == 201 else None
+
+if pyfnid:
+    s, pex, _ = call('POST', f'/v1/functions/{pyfnid}/executions', {})
+    body = pex.get('response') or {}
+    check('runtimes', 'python function executes against real data',
+          s in (200, 201) and pex.get('status') == 'completed' and body.get('total', 0) > 0 and body.get('env') == 'on',
+          f'{s} {str(pex)[:200]}')
+    check('runtimes', 'python logs and runtime are recorded',
+          pex.get('runtime') == 'python-3' and any(str(l).startswith('py POST') for l in pex.get('logs', [])),
+          f'{pex.get("runtime")} {str(pex.get("logs"))[:120]}')
+
+    call('PATCH', f'/v1/functions/{pyfnid}', {'code': 'def handler(ctx):\n    raise ValueError("smoke")\n'})
+    s, perr, _ = call('POST', f'/v1/functions/{pyfnid}/executions', {})
+    check('runtimes', 'python exceptions are reported cleanly',
+          perr.get('status') == 'failed' and any('ValueError' in str(e) for e in perr.get('errors', [])),
+          str(perr.get('errors'))[:120])
+
+s, badrt, _ = call('POST', '/v1/functions', {'name': f'Cobol {TAG}', 'runtime': 'cobol-85'})
+check('runtimes', 'unknown runtime is a 400', s == 400, f'{s} {str(badrt)[:100]}')
+
+s, legacy, _ = call('POST', '/v1/functions', {'name': f'Legacy {TAG}', 'runtime': 'node-18'})
+check('runtimes', 'legacy node-18 is normalised', s == 201 and legacy.get('runtime') == 'node-22', f'{s} {legacy.get("runtime")}')
+legacy_id = legacy.get('id') if s == 201 else None
+
 # ------------------------------------------------------ 13 document permissions
 s, pc, _ = call('POST', '/v1/databases/collections', {'name': f'Perm {TAG}', 'documentSecurity': True})
 check('docperm', 'create secured collection', s == 201 and pc.get('documentSecurity') is True, f'{s} {str(pc)[:120]}')
@@ -798,6 +842,8 @@ for path in [f'/v1/users/{uid_}' if uid_ else None,
              f'/v1/users/{muid}' if muid else None,
              f'/v1/databases/collections/{bcid}' if bcid else None,
              f'/v1/functions/{fnid}' if fnid else None,
+             f'/v1/functions/{pyfnid}' if pyfnid else None,
+             f'/v1/functions/{legacy_id}' if legacy_id else None,
              f'/v1/sites/{sid}' if sid else None,
              f'/v1/storage/buckets/{bid}' if bid else None,
              f'/v1/databases/collections/{cid}' if cid else None,
