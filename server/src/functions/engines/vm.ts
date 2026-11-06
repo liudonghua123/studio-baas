@@ -1,26 +1,12 @@
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
+import type { ExecContext } from '../types.js';
 
 const nodeRequire = createRequire(import.meta.url);
 const ALLOWED_MODULES = new Set([
   'crypto', 'node:crypto', 'url', 'node:url', 'util', 'node:util',
   'querystring', 'node:querystring', 'buffer', 'node:buffer', 'uuid',
 ]);
-
-export interface ExecContext {
-  req: { method: string; path: string; headers: Record<string, string>; body: any; query: Record<string, string> };
-  res: {
-    status: number; headers: Record<string, string>; body: any;
-    json(b: any): any; text(b: string): any; send(b: any): any; redirect(u: string): any;
-  };
-  log: (...args: any[]) => void;
-  error: (...args: any[]) => void;
-  env: Record<string, string>;
-  databases: Record<string, (...args: any[]) => any>;
-  storage: Record<string, (...args: any[]) => any>;
-  users: Record<string, (...args: any[]) => any>;
-  meta: Record<string, unknown>;
-}
 
 /** Transpile a small subset of ESM (default export + named imports) to CJS. */
 export function transpile(code: string): string {
@@ -44,10 +30,10 @@ export function transpile(code: string): string {
  *
  * 这是**降级路径**：和主进程共享一个事件循环，所以只能中断同步死循环
  * （`while(true){}`），`await` 之后的死循环依旧会拖住整个进程。
- * 默认走 function-worker.mjs（独立线程，可被 terminate），只有显式设置
+ * 默认走 javascript-worker.mjs（独立线程，可被 terminate），只有显式设置
  * `FUNCTION_ISOLATION=vm` 或 worker 无法启动时才会落到这里。
  *
- * 注意：worker 里的那份实现是纯 JS 复制品（见 function-worker.mjs），
+ * 注意：worker 里的那份实现是纯 JS 复制品（见 javascript-worker.mjs），
  * 改动这里的沙箱 API 时要同步改过去。
  */
 export async function runInSandbox(code: string, ctx: ExecContext, timeoutSec = 15): Promise<any> {

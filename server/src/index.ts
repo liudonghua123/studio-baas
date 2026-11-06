@@ -26,6 +26,7 @@ import { mountMfaRoutes } from './mfa/routes.js';
 import { gateAfterPrimary, loginResponse } from './mfa/gate.js';
 import { rateLimit, startRateLimitSweeper } from './ratelimit.js';
 import { PERMISSIONS, ROLES, permissionsForRole } from './rbac.js';
+import { getRuntimeInfo, listRuntimes } from './functions/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
@@ -123,7 +124,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ---------------------------------------------------------------- core */
-app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.12.0-studio', uptime: process.uptime() }));
+app.get('/v1/health', (_req, res) => res.json({ ok: true, status: 'healthy', version: '1.13.0-studio', uptime: process.uptime() }));
 
 app.get('/v1/project', guard('project.read'), (_req, res) => {
   const p = projects.getProject(currentProjectId()) || projects.defaultProject();
@@ -375,6 +376,11 @@ app.get('/v1/storage/files/:fileId/view', wrap((req, res) => {
 app.delete('/v1/storage/files/:fileId', guard('storage.write'), wrap((req, res) => res.json({ ok: store.deleteFile(req.params.fileId) })));
 
 /* ------------------------------------------------------------ functions */
+// 运行时清单：控制台据此渲染语言选择器，CLI 也能发现「本机装了哪几门语言」
+app.get('/v1/runtimes', guard('functions.read'), (_req, res) => {
+  res.json({ total: listRuntimes().length, runtimes: listRuntimes() });
+});
+
 app.get('/v1/functions', guard('functions.read'), (_req, res) => res.json({ total: store.listFunctions().length, functions: store.listFunctions() }));
 
 app.post('/v1/functions', guard('functions.write'), wrap((req, res) => res.status(201).json(store.createFunction(req.body || {}))));
@@ -383,7 +389,7 @@ app.get('/v1/functions/:id', guard('functions.read'), wrap((req, res) => {
   const f = store.getFunction(req.params.id);
   if (!f) return fail(res, new Error('Function not found'), 404);
   const desc = db.prepare('SELECT value FROM settings WHERE key=?').get('fn_desc_' + f.id) as any;
-  res.json({ ...f, description: desc?.value || '' });
+  res.json({ ...f, description: desc?.value || '', runtimeInfo: getRuntimeInfo(f.runtime) || null });
 }));
 
 app.patch('/v1/functions/:id', guard('functions.write'), wrap((req, res) => {
@@ -415,7 +421,18 @@ app.get('/v1/executions', guard('functions.read'), (req, res) => {
 app.get('/v1/functions/:id/versions', guard('functions.read'), wrap((req, res) => {
   if (!store.getFunction(req.params.id)) return fail(res, new Error('Function not found'), 404);
   const versions = store.listVersions(req.params.id, Math.min(Number(req.query.limit) || 30, 100));
-  res.json({ total: versions.length, versions });
+  res.json({
+    total: versions.length,
+    versions: versions.map((v) => {
+      const info = getRuntimeInfo(v.runtime);
+      return {
+        ...v,
+        runtimeInfo: info
+          ? { id: info.id, label: info.label, language: info.language, color: info.color, protocol: info.protocol, version: info.availability.version || info.version }
+          : null,
+      };
+    }),
+  });
 }));
 
 app.get('/v1/functions/:id/versions/:vid', guard('functions.read'), wrap((req, res) => {

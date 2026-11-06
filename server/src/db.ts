@@ -249,6 +249,28 @@ export function migrate() {
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_apiKeys_hash ON apiKeys(secretHash)');
 
+  /* ------------------------------------------ multi-runtime functions (v1.13) */
+  // 注意：版本表的列要先补齐，再跑 backfill——老库上 backfill 的 INSERT 会带上这两列
+  // 执行记录带上「当时用的运行时」：函数之后换语言，历史仍然说得清
+  addColumn('executions', 'runtime', 'TEXT');
+  // 只迁移已知的历史写法，不用 LIKE 'node-%'：将来加 node-24 时不会被这条语句改掉
+  db.exec(`UPDATE functions SET runtime='node-22'
+    WHERE runtime IS NULL OR runtime='' OR lower(runtime) IN
+      ('node','nodejs','node-18','node-18.0','node-20','node-20.0')`);
+  db.exec(`UPDATE functions SET runtime='python-3'
+    WHERE lower(runtime) IN ('python','python3','py','python-3.10','python-3.11','python-3.12','python-3.13')`);
+  // 语言换了但入口还留着 .js 的老数据，补成该语言的默认入口
+  db.exec(`UPDATE functions SET entrypoint='main.py'
+    WHERE runtime='python-3' AND (entrypoint IS NULL OR entrypoint='' OR entrypoint LIKE '%.js')`);
+
+  // 版本快照也要记住当时的语言：否则 Node→Python 后回滚旧版本，会得到「Python 运行时跑 JS」
+  addColumn('functionVersions', 'runtime', 'TEXT');
+  addColumn('functionVersions', 'entrypoint', 'TEXT');
+  db.exec(`UPDATE functionVersions SET runtime=(SELECT runtime FROM functions f WHERE f.id=functionVersions.functionId)
+    WHERE runtime IS NULL OR runtime=''`);
+  db.exec(`UPDATE functionVersions SET entrypoint=(SELECT entrypoint FROM functions f WHERE f.id=functionVersions.functionId)
+    WHERE entrypoint IS NULL OR entrypoint=''`);
+
   /* -------------------------------------------- function versions (v1.8) */
   backfillFunctionVersions();
 
@@ -265,16 +287,16 @@ export function migrate() {
  */
 export function backfillFunctionVersions() {
   const unversioned = db.prepare(
-    `SELECT f.id, f.code, f.createdAt, COALESCE(f.projectId,'studio') AS projectId FROM functions f
-     WHERE NOT EXISTS (SELECT 1 FROM functionVersions v WHERE v.functionId=f.id)`,
-  ).all() as { id: string; code: string; createdAt: string; projectId: string }[];
+    `SELECT f.id, f.code, f.createdAt, COALESCE(f.projectId,'studio') AS projectId, f.runtime, f.entrypoint
+     FROM functions f WHERE NOT EXISTS (SELECT 1 FROM functionVersions v WHERE v.functionId=f.id)`,
+  ).all() as { id: string; code: string; createdAt: string; projectId: string; runtime: string; entrypoint: string }[];
   if (unversioned.length) {
     const ins = db.prepare(
-      'INSERT INTO functionVersions (id,projectId,functionId,version,code,label,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?)',
+      'INSERT INTO functionVersions (id,projectId,functionId,version,code,label,createdBy,createdAt,runtime,entrypoint) VALUES (?,?,?,?,?,?,?,?,?,?)',
     );
     db.transaction(() => {
       for (const f of unversioned) {
-        ins.run(`fv_${f.id}_1`, f.projectId, f.id, 1, f.code, 'initial', 'system', f.createdAt);
+        ins.run(`fv_${f.id}_1`, f.projectId, f.id, 1, f.code, 'initial', 'system', f.createdAt, f.runtime, f.entrypoint);
       }
     })();
   }

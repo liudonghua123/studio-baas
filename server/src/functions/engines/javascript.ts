@@ -1,26 +1,13 @@
 import { Worker } from 'node:worker_threads';
-import { runInSandbox, transpile, type ExecContext } from './sandbox.js';
-import { currentPrincipal, currentProjectId, runWithContext, type Principal } from './context.js';
-
-export type { ExecContext };
-export { transpile };
-
-/** 一次执行的产出：日志要跨线程带回来，错误单独标记，便于落库时区分 */
-export interface ExecutionOutcome {
-  value: any;
-  logs: string[];
-  errors: string[];
-  failure?: string;
-  /** worker 里设置的响应状态/头；vm 降级路径直接写在同一对象上，无需回传 */
-  status?: number;
-  headers?: Record<string, string>;
-}
+import { runInSandbox } from './vm.js';
+import { currentPrincipal, currentProjectId, runWithContext, type Principal } from '../../context.js';
+import type { ExecContext, ExecutionOutcome, RunInput } from '../types.js';
 
 const PAYLOAD_BYTES = 2 * 1024 * 1024;
-const WORKER_URL = new URL('./function-worker.mjs', import.meta.url);
+const WORKER_URL = new URL('./javascript-worker.mjs', import.meta.url);
 
 /**
- * 执行用户函数。
+ * 执行 JavaScript / Node 函数。
  *
  * 默认走 worker 线程：`await null; while(true){}` 这类「异步后的死循环」在主线程里
  * 无法中断（vm 的 timeout 只覆盖同步段，Promise.race 又依赖事件循环），会让整个
@@ -29,20 +16,17 @@ const WORKER_URL = new URL('./function-worker.mjs', import.meta.url);
  * 降级顺序：worker → 同进程 vm（`FUNCTION_ISOLATION=vm` 可强制），
  * 保证在受限环境（无 SharedArrayBuffer / worker 启动失败）里功能不中断。
  */
-export async function executeFunctionCode(
-  code: string,
-  ctx: ExecContext,
-  timeoutSec = 15,
-): Promise<ExecutionOutcome> {
+export async function executeJavaScript(input: RunInput): Promise<ExecutionOutcome> {
+  const { code, ctx, timeout } = input;
   if (process.env.FUNCTION_ISOLATION === 'vm') {
-    return { value: await runInSandbox(code, ctx, timeoutSec), logs: [], errors: [] };
+    return { value: await runInSandbox(code, ctx, timeout), logs: [], errors: [] };
   }
   try {
-    return await runIsolated(code, ctx, timeoutSec);
+    return await runIsolated(code, ctx, timeout);
   } catch (e: any) {
     if (e?.code !== 'WORKER_UNAVAILABLE') throw e;
     console.warn('[runtime] worker unavailable, falling back to in-process vm:', e.message);
-    return { value: await runInSandbox(code, ctx, timeoutSec), logs: [], errors: [] };
+    return { value: await runInSandbox(code, ctx, timeout), logs: [], errors: [] };
   }
 }
 
@@ -144,7 +128,7 @@ function runIsolated(code: string, ctx: ExecContext, timeoutSec: number): Promis
     worker.on('error', (err: any) => {
       if (settled) return;
       if (err?.code === 'ERR_WORKER_OUT_OF_MEMORY') {
-        return finish(new Error(`Function exceeded the memory limit (256MB)`));
+        return finish(new Error('Function exceeded the memory limit (256MB)'));
       }
       // 启动期错误（文件缺失、加载器未注册）视为环境问题，交由上层降级
       const code = String(err?.code || '');

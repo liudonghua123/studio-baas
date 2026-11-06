@@ -366,16 +366,20 @@ export const tools: ToolDef[] = [
   },
   {
     name: 'create_function',
-    description: 'Create a new Node.js serverless function.',
+    description: 'Create a multi-language serverless function. Runtimes: node-22 (JavaScript) or python-3 (Python). Omit runtime for node-22.',
     parameters: {
       type: 'object',
-      properties: { name: { type: 'string' }, code: { type: 'string' } },
+      properties: {
+        name: { type: 'string' },
+        code: { type: 'string' },
+        runtime: { type: 'string', description: 'node-22 or python-3' },
+      },
       required: ['name'],
     },
-    summary: (a) => `创建函数 ${a.name}`,
+    summary: (a) => `创建函数 ${a.name}${a.runtime ? ` (${a.runtime})` : ''}`,
     run: (a) => {
-      const f = createFunction({ name: a.name, code: a.code });
-      return { ok: true, id: f.id, name: f.name };
+      const f = createFunction({ name: a.name, code: a.code, runtime: a.runtime });
+      return { ok: true, id: f.id, name: f.name, runtime: f.runtime, entrypoint: f.entrypoint };
     },
   },
   {

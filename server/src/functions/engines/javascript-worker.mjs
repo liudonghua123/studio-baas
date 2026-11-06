@@ -3,13 +3,13 @@
  *
  * 为什么是纯 JS：开发态用 tsx 跑 TS，而 Node 的 worker 不会继承主线程的
  * ESM loader hooks（实测 `execArgv: ['--import','tsx']` 无效），所以这个文件
- * 必须是 Node 能直接加载的 .mjs。tsc 用 allowJs 原样复制到 dist/。
+ * 必须是 Node 能直接加载的 .mjs。tsc 用 allowJs 原样复制到 dist/functions/engines/。
  *
  * 数据访问不在 worker 里做：better-sqlite3 连接留在主线程，worker 通过
  * SharedArrayBuffer + Atomics.wait 发起**同步** RPC。这样函数里 `databases.*`
  * 依旧能同步取到值，同时保证项目隔离、事件广播、单写连接都不受影响。
  *
- * 沙箱 API 与 src/sandbox.ts 保持一致，改动需同步。
+ * 沙箱 API 与 engines/vm.ts 保持一致，改动需同步。
  */
 import { parentPort, workerData } from 'node:worker_threads';
 import vm from 'node:vm';

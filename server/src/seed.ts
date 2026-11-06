@@ -301,6 +301,30 @@ export default async ({ req, res, log, env }) => {
       .run('fn_desc_' + id, description);
   }
 
+  // 第二个运行时：演示同一套控制台里跑 Python，而不是只有 JS 一条路
+  const fnPricing = `def handler(ctx):
+    products = ctx.databases.list_documents("products", {"limit": 100})
+    items = products["documents"]
+    total = sum(float(p["data"].get("price") or 0) for p in items)
+    low = [p["data"]["name"] for p in items if int(p["data"].get("stock") or 0) < 10]
+    ctx.log("Priced", products["total"], "products")
+    return ctx.res.json({
+        "products": products["total"],
+        "averagePrice": round(total / max(len(items), 1), 2),
+        "lowStock": low,
+    })
+`;
+  {
+    const t = new Date(Date.now() - 2 * 86400_000).toISOString();
+    db.prepare(`INSERT INTO functions (id,name,runtime,entrypoint,code,schedule,timeout,env,enabled,executeAccess,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'fn_pricing', 'Price feed', 'python-3', 'main.py', fnPricing, '0 */4 * * *', 20,
+      JSON.stringify({ CURRENCY: 'EUR' }), 1, 'any', t, t,
+    );
+    db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING')
+      .run('fn_desc_fn_pricing', 'Python 3 price feed: recomputes average price and low-stock list from the Products collection.');
+  }
+
   /* ---------------------------------------------------------------- sites */
   const siteFiles = siteSeed();
   const t0 = new Date(Date.now() - 12 * 86400_000).toISOString();
@@ -386,15 +410,16 @@ export default async ({ req, res, log, env }) => {
   }
 
   /* ---------------------------------------------------------- executions */
-  const execIns = db.prepare('INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt) VALUES (?,?,?,?,?,?,?,?,?)');
-  for (let i = 0; i < 18; i++) {
-    const fnId = ['fn_order', 'fn_stats', 'fn_health'][i % 3];
+  const execIns = db.prepare('INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt,runtime) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  for (let i = 0; i < 20; i++) {
+    const fnId = ['fn_order', 'fn_stats', 'fn_health', 'fn_pricing'][i % 4];
     const failed = i === 7;
     execIns.run(uid('exec_'), fnId, failed ? 'failed' : 'completed', i % 3 === 0 ? 'schedule' : 'manual',
       Math.round(30 + Math.random() * 220),
       JSON.stringify(failed ? ['Function invoked', 'ERROR upstream timeout'] : ['Function invoked', 'Completed successfully']),
       JSON.stringify(failed ? null : { ok: true }), failed ? JSON.stringify(['upstream timeout']) : JSON.stringify([]),
-      new Date(Date.now() - i * 3 * 3600_000).toISOString());
+      new Date(Date.now() - i * 3 * 3600_000).toISOString(),
+      fnId === 'fn_pricing' ? 'python-3' : 'node-22');
   }
 
   return true;

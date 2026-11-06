@@ -3,7 +3,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, now, uid, UPLOAD_DIR } from './db.js';
 import { bus } from './events.js';
-import { executeFunctionCode, type ExecContext } from './runtime.js';
+import {
+  runFunction, defaultTemplateFor, getRuntimeInfo, normalizeRuntimeId, resolveRuntime,
+  type ExecContext,
+} from './functions/index.js';
 import { currentProjectId, currentPrincipal } from './context.js';
 import { parseQueries } from './query.js';
 import { hashApiKey, newApiKeySecret, previewApiKey } from './apikey.js';
@@ -594,7 +597,7 @@ export function deleteFile(id: string) {
 /* --------------------------------------------------------------- functions */
 
 const funcFromRow = (r: any) => ({
-  id: r.id, name: r.name, runtime: r.runtime, entrypoint: r.entrypoint, code: r.code,
+  id: r.id, name: r.name, runtime: normalizeRuntimeId(r.runtime), entrypoint: r.entrypoint, code: r.code,
   schedule: r.schedule, timeout: r.timeout, env: safeJson<Record<string, string>>(r.env, {}),
   enabled: !!r.enabled, executeAccess: r.executeAccess || 'any',
   createdAt: r.createdAt, updatedAt: r.updatedAt,
@@ -617,13 +620,17 @@ export function getFunction(id: string) {
 export function createFunction(input: { name: string; runtime?: string; code?: string; entrypoint?: string; timeout?: number; env?: Record<string, string>; schedule?: string }) {
   const id = uid('fn_');
   const t = now();
+  // 未知 / 本机不可用的运行时在创建时就拒绝，避免保存成功却永远跑不起来
+  const runtime = resolveRuntime(input.runtime);
+  const entrypoint = input.entrypoint || runtime.entrypoint;
+  const code = input.code || defaultTemplateFor(runtime.id) || DEFAULT_FUNCTION_CODE;
   db.prepare(`INSERT INTO functions (id,name,runtime,entrypoint,code,schedule,timeout,env,enabled,executeAccess,createdAt,updatedAt,projectId)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id, input.name, input.runtime || 'node-22', input.entrypoint || 'src/main.js',
-    input.code || DEFAULT_FUNCTION_CODE, input.schedule || '', input.timeout ?? 15,
+    id, input.name, runtime.id, entrypoint,
+    code, input.schedule || '', input.timeout ?? 15,
     JSON.stringify(input.env || {}), 1, 'any', t, t, pid(),
   );
-  snapshotVersion(id, input.code || DEFAULT_FUNCTION_CODE, 'initial');
+  snapshotVersion(id, code, 'initial', runtime.id, entrypoint);
   bus.publish({ type: 'function', action: 'create', resource: input.name });
   return getFunction(id)!;
 }
@@ -641,13 +648,26 @@ export function updateFunction(id: string, patch: Partial<{
     ?? (Array.isArray(patch.variables)
       ? Object.fromEntries(patch.variables.filter((v) => v && v.key).map((v) => [String(v.key), String(v.value ?? '')]))
       : cur.env);
+
+  // 切换语言：没显式给入口文件就跟着新运行时走；如果代码还是旧运行时的
+  // 初始模板，顺手换成新语言的同名模板，避免 main.js 里塞着 Python。
+  const nextRuntime = patch.runtime !== undefined ? resolveRuntime(patch.runtime) : null;
+  const switched = !!(nextRuntime && nextRuntime.id !== cur.runtime);
+  const entrypoint = patch.entrypoint ?? (switched ? nextRuntime!.entrypoint : cur.entrypoint);
+  let code = patch.code ?? cur.code;
+  if (switched && patch.code === undefined) {
+    const oldTpl = getRuntimeInfo(cur.runtime)?.templates.find((tpl) => tpl.code.trim() === cur.code.trim());
+    const nextTpl = oldTpl && nextRuntime!.templates.find((tpl) => tpl.id === oldTpl.id);
+    if (nextTpl) code = nextTpl.code;
+  }
+
   db.prepare(`UPDATE functions SET name=?,code=?,env=?,timeout=?,enabled=?,schedule=?,runtime=?,entrypoint=?,updatedAt=? WHERE id=?`).run(
-    patch.name ?? cur.name, patch.code ?? cur.code, JSON.stringify(env),
+    patch.name ?? cur.name, code, JSON.stringify(env),
     patch.timeout ?? cur.timeout, (patch.enabled ?? cur.enabled) ? 1 : 0,
-    patch.schedule ?? cur.schedule, patch.runtime ?? cur.runtime, patch.entrypoint ?? cur.entrypoint, now(), id,
+    patch.schedule ?? cur.schedule, nextRuntime?.id ?? cur.runtime, entrypoint, now(), id,
   );
   // 每次代码变更都是一次不可变部署，可随时回滚
-  if (patch.code !== undefined && patch.code !== cur.code) snapshotVersion(id, patch.code, 'save');
+  if (code !== cur.code) snapshotVersion(id, code, 'save', nextRuntime?.id ?? cur.runtime, entrypoint);
   bus.publish({ type: 'function', action: 'update', resource: cur.name });
   return getFunction(id);
 }
@@ -676,11 +696,13 @@ const VERSION_KEEP = 30;
 
 export interface FunctionVersion {
   id: string; functionId: string; version: number; code: string;
+  runtime: string; entrypoint: string;
   label: string | null; createdBy: string | null; createdAt: string;
 }
 
 const versionFromRow = (r: any): FunctionVersion => ({
   id: r.id, functionId: r.functionId, version: r.version, code: r.code,
+  runtime: normalizeRuntimeId(r.runtime), entrypoint: r.entrypoint || '',
   label: r.label, createdBy: r.createdBy, createdAt: r.createdAt,
 });
 
@@ -697,14 +719,17 @@ export function getVersion(functionId: string, versionId: string): FunctionVersi
 }
 
 /** 写入一条不可变快照；保存代码与回滚都走这里 */
-function snapshotVersion(functionId: string, code: string, label: string | null) {
+function snapshotVersion(
+  functionId: string, code: string, label: string | null,
+  runtime: string, entrypoint: string,
+) {
   const max = (db.prepare('SELECT COALESCE(MAX(version),0) v FROM functionVersions WHERE functionId=?')
     .get(functionId) as any).v as number;
   const version = max + 1;
-  db.prepare(`INSERT INTO functionVersions (id,projectId,functionId,version,code,label,createdBy,createdAt)
-    VALUES (?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO functionVersions (id,projectId,functionId,version,code,label,createdBy,createdAt,runtime,entrypoint)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     uid('fv_'), pid(), functionId, version, code, label,
-    currentPrincipal()?.name || 'system', now(),
+    currentPrincipal()?.name || 'system', now(), runtime, entrypoint,
   );
   db.prepare('DELETE FROM functionVersions WHERE functionId=? AND version <= ?').run(functionId, version - VERSION_KEEP);
   return version;
@@ -716,8 +741,10 @@ export function restoreVersion(functionId: string, versionId: string): (ReturnTy
   if (!fn) throw new Error('Function not found');
   const v = getVersion(functionId, versionId);
   if (!v) throw new Error('Version not found');
-  db.prepare('UPDATE functions SET code=?, updatedAt=? WHERE id=?').run(v.code, now(), functionId);
-  snapshotVersion(functionId, v.code, `restored from v${v.version}`);
+  // 版本里带着当时的运行时与入口：回滚不仅恢复代码，也恢复「这份代码该怎么跑」
+  db.prepare('UPDATE functions SET code=?, runtime=?, entrypoint=?, updatedAt=? WHERE id=?')
+    .run(v.code, v.runtime || fn.runtime, v.entrypoint || fn.entrypoint, now(), functionId);
+  snapshotVersion(functionId, v.code, `restored from v${v.version}`, v.runtime || fn.runtime, v.entrypoint || fn.entrypoint);
   bus.publish({ type: 'function', action: 'restore', resource: fn.name });
   return getFunction(functionId);
 }
@@ -735,6 +762,7 @@ export function listExecutions(functionId?: string, limit = 30) {
     : db.prepare('SELECT * FROM executions WHERE projectId=? ORDER BY createdAt DESC LIMIT ?').all(pid(), limit);
   return (rows as any[]).map((r) => ({
     id: r.id, functionId: r.functionId, status: r.status, triggerType: r.triggerType,
+    runtime: r.runtime || null,
     duration: r.duration, logs: safeJson<string[]>(r.logs, []),
     response: safeJson<any>(r.response, null), errors: safeJson<string[]>(r.errors, []),
     createdAt: r.createdAt,
@@ -782,8 +810,13 @@ export async function executeFunction(id: string, payload: any, triggerType = 'm
   } satisfies ExecContext;
 
   let status: 'completed' | 'failed' = 'completed';
+  let runtimeUsed = fn.runtime;
   try {
-    const outcome = await executeFunctionCode(fn.code, ctx, fn.timeout);
+    const outcome = await runFunction({
+      runtime: fn.runtime, code: fn.code, entrypoint: fn.entrypoint,
+      timeout: fn.timeout, env: fn.env, ctx,
+    });
+    runtimeUsed = outcome.runtime || fn.runtime;
     // worker 在独立线程里收集的日志要搬回来一起落库
     if (outcome.logs.length) logs.push(...outcome.logs);
     if (outcome.errors.length) errors.push(...outcome.errors);
@@ -797,15 +830,15 @@ export async function executeFunction(id: string, payload: any, triggerType = 'm
   }
   const duration = Date.now() - started;
   const execId = uid('exec_');
-  db.prepare(`INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt,projectId)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO executions (id,functionId,status,triggerType,duration,logs,response,errors,createdAt,projectId,runtime)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
     execId, id, status, triggerType, duration, JSON.stringify(logs),
-    JSON.stringify(res.body), JSON.stringify(errors), now(), pid(),
+    JSON.stringify(res.body), JSON.stringify(errors), now(), pid(), runtimeUsed,
   );
   addLog({ method: 'POST', path: `/v1/functions/${fn.name}/executions`, status: status === 'completed' ? 200 : 500, duration, service: 'functions' });
   bus.publish({ type: 'execution', action: status, resource: fn.name });
   return {
-    id: execId, functionId: id, functionName: fn.name, status, duration,
+    id: execId, functionId: id, functionName: fn.name, status, duration, runtime: runtimeUsed,
     statusCode: res.status, headers: res.headers, response: res.body, logs, errors,
     trigger: triggerType, createdAt: now(),
   };
