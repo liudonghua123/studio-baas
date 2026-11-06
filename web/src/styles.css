@@ -1329,3 +1329,26 @@ tr:hover .row-actions { opacity: 1; }
 .login-mfa-alt { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .login-mfa-alt .login-submit { margin-top: 0; }
 .login-card .login-note { margin-bottom: 14px; }
+
+/* ---------------------------------------------------- function runtimes */
+.runtime-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; padding: 2px 8px 2px 6px; border-radius: 999px;
+  background: var(--w4); border: 1px solid var(--line); color: var(--text);
+  white-space: nowrap;
+}
+.runtime-chip i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+.runtime-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.runtime-option {
+  display: flex; align-items: flex-start; gap: 9px; text-align: left;
+  padding: 10px 11px; border-radius: 9px; cursor: pointer;
+  background: var(--w2); border: 1px solid var(--line); color: var(--text);
+  transition: border-color .15s, background .15s;
+}
+.runtime-option:hover { border-color: var(--line-strong); background: var(--w3); }
+.runtime-option.active { border-color: var(--pink); background: var(--pink-soft); }
+.runtime-option:disabled { opacity: .5; cursor: not-allowed; }
+.runtime-option b { display: block; font-size: 12.5px; font-weight: 550; }
+.runtime-option em { display: block; font-style: normal; font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+.runtime-dot { width: 10px; height: 10px; border-radius: 3px; margin-top: 3px; flex: none; }
+@media (max-width: 620px) { .runtime-grid { grid-template-columns: minmax(0, 1fr); } }

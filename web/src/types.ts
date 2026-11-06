@@ -36,12 +36,24 @@ export interface FileItem {
   id: string; bucketId: string; name: string; mimeType: string; size: number;
   createdAt: string; url: string;
 }
+export interface RuntimeTemplate {
+  id: string; label: string; description: string; code: string;
+}
+export interface RuntimeAvailability {
+  available: boolean; reason?: string; binary?: string; version?: string;
+}
+export interface RuntimeInfo {
+  id: string; label: string; language: string; version: string;
+  extension: string; entrypoint: string; protocol: string; color: string;
+  availability: RuntimeAvailability; templates: RuntimeTemplate[];
+}
 export interface FunctionDef {
   id: string; name: string; runtime: string; entrypoint: string; code: string;
   schedule: string; timeout: number; env: Record<string, string>; enabled: boolean;
   executeAccess: string; createdAt: string; updatedAt: string;
   executions?: number; lastExecution?: { createdAt: string; status: string } | null;
   description?: string;
+  runtimeInfo?: RuntimeInfo | null;
 }
 export interface FunctionDomain {
   id: string; projectId: string; functionId: string; hostname: string;
@@ -74,10 +86,14 @@ export interface GitCommit {
 export interface Execution {
   id: string; functionId: string; functionName: string; status: string; triggerType: string;
   duration: number; logs: string[]; response: any; errors: string[]; createdAt: string;
-  statusCode?: number;
+  statusCode?: number; runtime?: string | null;
+}
+export interface RuntimeBadge {
+  id: string; label: string; language: string; color: string; protocol: string; version: string;
 }
 export interface FunctionVersion {
   id: string; functionId: string; version: number; code: string;
+  runtime?: string; entrypoint?: string; runtimeInfo?: RuntimeBadge | null;
   label: string | null; createdBy: string | null; createdAt: string;
 }
 export interface SiteFile { path: string; content: string }

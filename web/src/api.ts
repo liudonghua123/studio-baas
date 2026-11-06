@@ -1,6 +1,7 @@
 import type {
   AiStatus, ApiKey, Attribute, Bucket, ChatReply, Collection, Doc, Execution,
   FileItem, FunctionDef, FunctionDomain, FunctionVersion, CollectionIndex, QueryPlan, GitCommit, GitDeploy, GitIntegration,
+  RuntimeInfo,
   LogEntry, Me, Member, Message, Metrics, Project, Schedule, Site, User,
   AiSession, AiMessage, AgentEvent, Webhook, WebhookDelivery,
   PublicProvider, IdentityProvider, MfaStatus, MfaMethod, MfaPolicy, MfaGap, MfaAvailable, LoginResult,
@@ -145,6 +146,7 @@ export const api = {
   deleteFile: (id: string) => del(`/v1/storage/files/${id}`),
 
   functions: () => get<{ functions: FunctionDef[] }>('/v1/functions'),
+  runtimes: () => get<{ total: number; runtimes: RuntimeInfo[] }>('/v1/runtimes'),
   function: (id: string) => get<FunctionDef>(`/v1/functions/${id}`),
   createFunction: (body: any) => post<FunctionDef>('/v1/functions', body),
   updateFunction: (id: string, body: any) => patch<FunctionDef>(`/v1/functions/${id}`, body),

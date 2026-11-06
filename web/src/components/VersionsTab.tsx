@@ -69,6 +69,7 @@ export default function VersionsTab({ functionId, functionName, currentCode, onR
                   <th style={{ width: 28 }} />
                   <th style={{ width: 90 }}>{t('Version')}</th>
                   <th style={{ width: 110 }}>{t('Label')}</th>
+                  <th style={{ width: 130 }}>{t('Runtime')}</th>
                   <th>{t('Author')}</th>
                   <th style={{ width: 150 }}>{t('Saved')}</th>
                   <th style={{ width: 96 }} />
@@ -84,6 +85,12 @@ export default function VersionsTab({ functionId, functionName, currentCode, onR
                         {i === 0 && <Badge tone="green" dot>{t('latest')}</Badge>}
                       </td>
                       <td className="tiny dim">{v.label || '—'}</td>
+                      <td>
+                        <span className="runtime-chip" title={v.runtimeInfo?.protocol || ''}>
+                          <i style={{ background: v.runtimeInfo?.color || '#8b5cf6' }} />
+                          {v.runtimeInfo?.label || v.runtime || '—'}
+                        </span>
+                      </td>
                       <td className="cell-sub">{v.createdBy || t('system')}</td>
                       <td className="dim tiny" title={fmtDateTime(v.createdAt)}>{timeAgo(v.createdAt)}</td>
                       <td onClick={(e) => e.stopPropagation()}>
@@ -105,7 +112,7 @@ export default function VersionsTab({ functionId, functionName, currentCode, onR
                     {openId === v.id && (
                       <tr>
                         <td />
-                        <td colSpan={5}>
+                        <td colSpan={6}>
                           <pre className="mono" style={{
                             margin: 0, padding: 12, background: 'var(--code-bg)', border: '1px solid var(--line)',
                             borderRadius: 8, maxHeight: 280, overflow: 'auto', fontSize: 11.5, lineHeight: 1.6,

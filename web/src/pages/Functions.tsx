@@ -2,29 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Boxes, Plus, Zap, Clock, ChevronRight, Terminal, Trash2, RefreshCw, Code2 } from 'lucide-react';
 import { api } from '../api';
-import type { Execution, FunctionDef } from '../types';
+import type { Execution, FunctionDef, RuntimeInfo } from '../types';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { statusTone, timeAgo, fmtDuration } from '../lib/format';
 import { statusLabel } from '../lib/status';
 import { useAuth } from '../lib/auth';
 import { useT } from '../lib/locale';
-
-const TEMPLATES: Record<string, string> = {
-  'Hello world': `export default async ({ req, res, log }) => {
-  log('Hello from the edge');
-  return res.json({ ok: true, message: 'Hello world' });
-};`,
-  'REST proxy': `export default async ({ req, res, log, databases }) => {
-  const products = databases.listDocuments('products', { limit: 5 });
-  return res.json({ count: products.total, items: products.documents });
-};`,
-  'Scheduled job': `export default async ({ res, log, databases }) => {
-  log('Running scheduled aggregation at', new Date().toISOString());
-  const orders = databases.listDocuments('orders', { limit: 100 });
-  const revenue = orders.documents.reduce((s, o) => s + Number(o.data.total || 0), 0);
-  return res.json({ revenue, orders: orders.total });
-};`,
-};
 
 /** Trigger values come from the API; only the label is translated. */
 const TRIGGER_LABEL: Record<string, string> = { manual: 'Manual', schedule: 'Schedule', http: 'HTTP', event: 'Event' };
@@ -34,8 +17,9 @@ export default function Functions() {
   const [fns, setFns] = useState<FunctionDef[]>([]);
   const [execs, setExecs] = useState<Execution[]>([]);
   const [loading, setLoading] = useState(true);
+  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', template: 'Hello world' });
+  const [form, setForm] = useState({ name: '', runtime: 'node-22', template: 'hello' });
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const { can } = useAuth();
@@ -44,18 +28,28 @@ export default function Functions() {
 
   const load = async () => {
     try {
-      setFns((await api.functions()).functions);
-      setExecs((await api.allExecutions()).executions);
+      const [list, execs, rts] = await Promise.all([
+        api.functions(), api.allExecutions(), api.runtimes(),
+      ]);
+      setFns(list.functions);
+      setExecs(execs.executions);
+      setRuntimes(rts.runtimes);
+      // 默认选中第一个可用运行时；本机只有 Python 时也不要用 JS 模板建函数
+      const available = rts.runtimes.filter((r) => r.availability.available);
+      setForm((f) => (available.some((r) => r.id === f.runtime) ? f : { ...f, runtime: available[0]?.id || f.runtime }));
     } catch (e: any) { toast.push(e.message, 'err'); }
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
+  const selected = runtimes.find((r) => r.id === form.runtime);
+  const template = selected?.templates.find((tpl) => tpl.id === form.template) || selected?.templates[0];
+
   const create = async () => {
-    if (!form.name) return;
+    if (!form.name || !selected || !template) return;
     setBusy(true);
     try {
-      const f = await api.createFunction({ name: form.name, code: TEMPLATES[form.template] });
+      const f = await api.createFunction({ name: form.name, runtime: selected.id, code: template.code, entrypoint: selected.entrypoint });
       toast.push(t('Function created'));
       setOpen(false);
       nav(`/functions/${f.id}`);
@@ -69,7 +63,7 @@ export default function Functions() {
         <div>
           <div className="eyebrow"><Boxes size={11} /> {t('Functions')}</div>
           <h1>{t('Serverless functions')}</h1>
-          <p>{t('Write, edit and execute Node.js code directly in the browser — no deploy pipeline required.')}</p>
+          <p>{t('Write, edit and execute Node.js or Python code directly in the browser — no deploy pipeline required.')}</p>
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={load}><RefreshCw size={14} /> {t('Refresh')}</button>
@@ -100,7 +94,17 @@ export default function Functions() {
                         </div>
                       </div>
                     </td>
-                    <td><Badge tone="violet">{f.runtime}</Badge></td>
+                    <td>
+                      {(() => {
+                        const rt = runtimes.find((r) => r.id === f.runtime);
+                        return (
+                          <span className="runtime-chip" title={rt?.protocol || f.runtime}>
+                            <i style={{ background: rt?.color || '#8b5cf6' }} />
+                            {rt?.label || f.runtime}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td>
                       {f.schedule ? <span className="flex tiny dim" style={{ gap: 5 }}><Clock size={11} /> {f.schedule}</span> : <span className="tiny dim">{t('Manual')}</span>}
                     </td>
@@ -187,10 +191,10 @@ export default function Functions() {
       </div>
 
       <Modal open={open} onClose={() => setOpen(false)} title={t('Create function')}
-        subtitle={t('Starts with an editable Node 22 template.')}
+        subtitle={t('Pick a runtime — the starter template is written in that language.')}
         footer={<>
           <button className="btn ghost" onClick={() => setOpen(false)}>{t('Cancel')}</button>
-          <button className="btn primary" disabled={!form.name || busy} onClick={create}>{busy ? t('Creating…') : t('Create function')}</button>
+          <button className="btn primary" disabled={!form.name || busy || !selected?.availability.available} onClick={create}>{busy ? t('Creating…') : t('Create function')}</button>
         </>}
       >
         <div className="field">
@@ -198,13 +202,38 @@ export default function Functions() {
           <input className="input" autoFocus placeholder={t('e.g. Stripe webhook')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
         <div className="field">
+          <label className="label">{t('Runtime')}</label>
+          <div className="runtime-grid">
+            {runtimes.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={`runtime-option ${form.runtime === r.id ? 'active' : ''}`}
+                disabled={!r.availability.available}
+                title={r.availability.reason || ''}
+                onClick={() => setForm({ ...form, runtime: r.id, template: r.templates[0]?.id || 'hello' })}
+              >
+                <span className="runtime-dot" style={{ background: r.color }} />
+                <span>
+                  <b>{r.label}</b>
+                  <em>
+                    {r.availability.available
+                      ? `${r.availability.version || r.version} · ${r.protocol}`
+                      : t('not installed on this host')}
+                  </em>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="field">
           <label className="label">{t('Template')}</label>
-          <select className="select" value={form.template} onChange={(e) => setForm({ ...form, template: e.target.value })}>
-            {Object.keys(TEMPLATES).map((tpl) => <option key={tpl} value={tpl}>{t(tpl)}</option>)}
+          <select className="select" value={template?.id || ''} onChange={(e) => setForm({ ...form, template: e.target.value })}>
+            {(selected?.templates || []).map((tpl) => <option key={tpl.id} value={tpl.id}>{t(tpl.label)}</option>)}
           </select>
         </div>
         <pre className="mono" style={{ background: 'var(--code-bg)', border: '1px solid var(--line)', borderRadius: 8, padding: 12, fontSize: 10.5, overflowX: 'auto', color: 'var(--code-accent)', margin: 0 }}>
-          {TEMPLATES[form.template]}
+          {template?.code || ''}
         </pre>
       </Modal>
     </div>

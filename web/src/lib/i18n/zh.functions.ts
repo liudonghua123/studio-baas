@@ -4,8 +4,10 @@ import type { Dict } from '../i18n.types';
 export const zhFunctions: Dict = {
   /* ------------------------------------------------------- functions list */
   'Serverless functions': '云函数',
-  'Write, edit and execute Node.js code directly in the browser — no deploy pipeline required.':
-    '在浏览器里直接编写、编辑并运行 Node.js 代码 —— 无需部署流水线。',
+  'Write, edit and execute Node.js or Python code directly in the browser — no deploy pipeline required.':
+    '在浏览器里直接编写、编辑并运行 Node.js / Python 代码 —— 无需部署流水线。',
+  'Pick a runtime — the starter template is written in that language.':
+    '选择运行时 —— 初始模板会用对应的语言写好。',
   'Create function': '创建函数',
   'Function created': '函数已创建',
   'No functions yet': '还没有函数',
@@ -27,7 +29,6 @@ export const zhFunctions: Dict = {
   'Success rate': '成功率',
   'Failed': '失败',
   'Avg duration': '平均耗时',
-  'Starts with an editable Node 22 template.': '从一个可编辑的 Node 22 模板开始。',
   'Creating…': '创建中…',
   'e.g. Stripe webhook': '例如 Stripe webhook',
   'Template': '模板',
@@ -85,6 +86,11 @@ export const zhFunctions: Dict = {
   'Execution failed': '执行失败',
   'Environment variables saved': '环境变量已保存',
   'Function settings updated': '函数设置已更新',
+  'Runtime switched to {runtime}': '已切换到 {runtime}',
+  'unavailable': '本机不可用',
+  'not installed on this host': '本机未安装',
+  'Switching runtime keeps your code unless it is still the starter template — then it is replaced with the equivalent template in the new language.':
+    '切换运行时会保留你的代码；除非代码仍是初始模板，这种情况下会换成新语言的同名模板。',
 
   /* ----------------------------------------------------------- schedules */
   'Every 5 minutes': '每 5 分钟',

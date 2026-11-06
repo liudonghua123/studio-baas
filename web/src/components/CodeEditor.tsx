@@ -8,6 +8,7 @@ import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
 import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
+import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { useTheme } from '../lib/theme';
 
@@ -17,6 +18,7 @@ const langOf = (lang: string): Extension => {
     case 'css': return css();
     case 'json': return json();
     case 'markdown': return markdown();
+    case 'python': return python();
     default: return javascript({ jsx: false });
   }
 };

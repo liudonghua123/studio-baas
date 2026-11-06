@@ -6,7 +6,7 @@ import {
   Code2, Globe2, CalendarClock, GitBranch, History,
 } from 'lucide-react';
 import { api } from '../api';
-import type { Execution, FunctionDef } from '../types';
+import type { Execution, FunctionDef, RuntimeInfo } from '../types';
 import CodeEditor from '../components/CodeEditor';
 import { Badge, Empty, Loading, Modal, useToast } from '../components/ui';
 import { fmtDuration, statusTone, timeAgo, fmtDateTime } from '../lib/format';
@@ -39,7 +39,8 @@ export default function FunctionDetail() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
   const [envRows, setEnvRows] = useState<{ k: string; v: string }[]>([]);
-  const [meta, setMeta] = useState({ name: '', timeout: 15, schedule: '' });
+  const [meta, setMeta] = useState({ name: '', timeout: 15, schedule: '', runtime: 'node-22' });
+  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [view, setView] = useState<'code' | 'versions' | 'domains' | 'schedules' | 'git'>('code');
 
   const load = async () => {
@@ -48,9 +49,11 @@ export default function FunctionDetail() {
       setFn(f);
       setCode(f.code);
       setDirty(false);
-      setMeta({ name: f.name, timeout: f.timeout, schedule: f.schedule });
+      setMeta({ name: f.name, timeout: f.timeout, schedule: f.schedule, runtime: f.runtime });
       setEnvRows(Object.entries(f.env).map(([k, v]) => ({ k, v })));
-      setExecs((await api.executions(id!)).executions);
+      const [runs, list] = await Promise.all([api.runtimes(), api.executions(id!)]);
+      setRuntimes(runs.runtimes);
+      setExecs(list.executions);
     } catch (e: any) { toast.push(e.message, 'err'); }
   };
   useEffect(() => { load(); }, [id]);
@@ -98,14 +101,25 @@ export default function FunctionDetail() {
   const saveSettings = async () => {
     if (!fn) return;
     try {
-      const f = await api.updateFunction(fn.id, { name: meta.name, timeout: meta.timeout, schedule: meta.schedule });
+      const runtimeChanged = meta.runtime !== fn.runtime;
+      const f = await api.updateFunction(fn.id, {
+        name: meta.name, timeout: meta.timeout, schedule: meta.schedule, runtime: meta.runtime,
+      });
       setFn(f);
+      // 只有切语言才动编辑器：重命名/改超时不该丢掉用户没保存的代码
+      if (runtimeChanged) {
+        setCode(f.code);
+        setDirty(false);
+      }
+      setMeta({ ...meta, runtime: f.runtime });
       setSettingsOpen(false);
-      toast.push(t('Function settings updated'));
+      toast.push(runtimeChanged ? t('Runtime switched to {runtime}', { runtime: f.runtimeInfo?.label || f.runtime }) : t('Function settings updated'));
     } catch (e: any) { toast.push(e.message, 'err'); }
   };
 
   const lines = useMemo(() => (result?.logs?.length ? result.logs : []), [result]);
+  const rt = fn?.runtimeInfo || runtimes.find((r) => r.id === fn?.runtime);
+  const language = rt?.language || (fn?.runtime.startsWith('python') ? 'python' : 'javascript');
 
   if (!fn) return <div className="page"><Loading rows={5} /></div>;
 
@@ -125,7 +139,7 @@ export default function FunctionDetail() {
             <div className="flex tiny dim" style={{ gap: 8, marginTop: 2 }}>
               <span className="mono">{fn.entrypoint}</span>
               <span>·</span>
-              <span>{fn.runtime}</span>
+              <span>{rt?.label || fn.runtime}</span>
               <span>·</span>
               <span>{t('timeout {seconds}s', { seconds: fn.timeout })}</span>
             </div>
@@ -164,9 +178,9 @@ export default function FunctionDetail() {
             <div className="editor-head">
               <span className="file">{fn.entrypoint}</span>
               {dirty && <span className="dirty-dot" title={t('Unsaved changes')} />}
-              <span style={{ marginLeft: 'auto' }}>Node.js 22 · ESM</span>
+              <span style={{ marginLeft: 'auto' }}>{rt?.label || fn.runtime} · {rt?.availability.version || rt?.version}</span>
             </div>
-            <CodeEditor value={code} onChange={(v) => { setCode(v); setDirty(true); }} language="javascript" height={440} />
+            <CodeEditor value={code} onChange={(v) => { setCode(v); setDirty(true); }} language={language} height={440} />
           </div>
 
           <div className="card">
@@ -223,7 +237,14 @@ export default function FunctionDetail() {
             <div className="card-head"><div className="card-title">{t('Overview')}</div></div>
             <div className="card-body">
               <dl className="kv">
-                <dt>{t('Runtime')}</dt><dd>{fn.runtime}</dd>
+                <dt>{t('Runtime')}</dt>
+                <dd>
+                  <span className="runtime-chip" title={rt?.protocol}>
+                    <i style={{ background: rt?.color || '#8b5cf6' }} />
+                    {rt?.label || fn.runtime}
+                  </span>
+                  <span className="tiny dim" style={{ marginLeft: 6 }}>{rt?.availability.version || rt?.version}</span>
+                </dd>
                 <dt>{t('Entrypoint')}</dt><dd className="mono">{fn.entrypoint}</dd>
                 <dt>{t('Timeout')}</dt><dd>{fn.timeout}s</dd>
                 <dt>{t('Schedule')}</dt><dd className="mono">{fn.schedule || t('manual')}</dd>
@@ -316,6 +337,19 @@ export default function FunctionDetail() {
         <div className="field">
           <label className="label">{t('Name')}</label>
           <input className="input" value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} />
+        </div>
+        <div className="field">
+          <label className="label">{t('Runtime')}</label>
+          <select className="select" value={meta.runtime} onChange={(e) => setMeta({ ...meta, runtime: e.target.value })}>
+            {runtimes.map((r) => (
+              <option key={r.id} value={r.id} disabled={!r.availability.available}>
+                {r.label} · {r.availability.version || r.version}{r.availability.available ? '' : ` (${t('unavailable')})`}
+              </option>
+            ))}
+          </select>
+          <div className="hint">
+            {t('Switching runtime keeps your code unless it is still the starter template — then it is replaced with the equivalent template in the new language.')}
+          </div>
         </div>
         <div className="input-row">
           <div className="field">
